@@ -4,6 +4,7 @@ WORKDIR /app
 COPY pom.xml .
 COPY common/pom.xml ./common/pom.xml
 COPY admin-api/pom.xml ./admin-api/pom.xml
+COPY gateway-core/pom.xml ./gateway-core/pom.xml
 
 RUN mvn dependency:go-offline -pl admin-api -am
 
