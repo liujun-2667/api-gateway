@@ -29,17 +29,19 @@ public class TrafficColoringFilter implements GlobalFilter, Ordered {
         TenantKeyInfo keyInfo = exchange.getAttribute(TenantAuthenticationFilter.TENANT_KEY_ATTR);
         Long tenantId = keyInfo != null ? keyInfo.getTenantId() : null;
 
-        String colorTag = trafficColorService.matchAndGetTag(request, tenantId);
-        if (colorTag != null && !colorTag.isEmpty()) {
-            log.debug("Adding traffic color tag: {} for request: {}", colorTag, request.getURI());
-            ServerHttpRequest mutatedRequest = request.mutate()
-                    .header(TRAFFIC_TAG_HEADER, colorTag)
-                    .build();
-            exchange.getAttributes().put("trafficTag", colorTag);
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
-        }
-
-        return chain.filter(exchange);
+        return trafficColorService.matchAndGetTag(request, tenantId)
+                .flatMap(colorTag -> {
+                    if (colorTag != null && !colorTag.isEmpty()) {
+                        log.debug("Adding traffic color tag: {} for request: {}", colorTag, request.getURI());
+                        ServerHttpRequest mutatedRequest = request.mutate()
+                                .header(TRAFFIC_TAG_HEADER, colorTag)
+                                .build();
+                        exchange.getAttributes().put("trafficTag", colorTag);
+                        return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                    }
+                    return chain.filter(exchange);
+                })
+                .switchIfEmpty(chain.filter(exchange));
     }
 
     @Override

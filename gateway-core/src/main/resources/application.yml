@@ -4,19 +4,10 @@ server:
 spring:
   application:
     name: api-gateway
-  datasource:
-    url: jdbc:postgresql://localhost:5432/apigateway
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/apigateway
     username: postgres
     password: postgres
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-    show-sql: false
   data:
     redis:
       host: localhost

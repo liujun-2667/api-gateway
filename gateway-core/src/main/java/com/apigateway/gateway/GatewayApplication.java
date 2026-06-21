@@ -2,12 +2,12 @@ package com.apigateway.gateway;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {"com.apigateway.gateway", "com.apigateway.common"})
-@EntityScan(basePackages = "com.apigateway.common.entity")
-@EnableJpaRepositories(basePackages = "com.apigateway.common")
+@EnableR2dbcRepositories(basePackages = "com.apigateway.gateway.repository")
+@EnableScheduling
 public class GatewayApplication {
 
     public static void main(String[] args) {

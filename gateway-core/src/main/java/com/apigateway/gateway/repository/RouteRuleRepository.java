@@ -1,18 +1,14 @@
 package com.apigateway.gateway.repository;
 
-import com.apigateway.common.entity.RouteRule;
-import com.apigateway.common.enums.RuleStatus;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
+import com.apigateway.gateway.entity.RouteRuleR2dbc;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.stereotype.Repository;
-
-import java.util.List;
+import reactor.core.publisher.Flux;
 
 @Repository
-public interface RouteRuleRepository extends JpaRepository<RouteRule, Long> {
+public interface RouteRuleRepository extends ReactiveCrudRepository<RouteRuleR2dbc, Long> {
 
-    @Query("SELECT r FROM RouteRule r JOIN FETCH r.tenant JOIN FETCH r.application WHERE r.status = :status ORDER BY r.priority DESC")
-    List<RouteRule> findAllActiveWithTenantAndApplication(RuleStatus status);
+    Flux<RouteRuleR2dbc> findByAppIdOrderByPriorityAsc(Long appId);
 
-    List<RouteRule> findByTenantIdAndStatus(Long tenantId, RuleStatus status);
+    Flux<RouteRuleR2dbc> findByStatus(String status);
 }

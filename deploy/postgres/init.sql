@@ -47,12 +47,18 @@ CREATE TABLE IF NOT EXISTS admin_users (
 -- API密钥表
 CREATE TABLE IF NOT EXISTS api_keys (
     id BIGSERIAL PRIMARY KEY,
+    key_id VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(128) NOT NULL,
+    api_key VARCHAR(256) NOT NULL UNIQUE,
     tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    key_value VARCHAR(256) NOT NULL UNIQUE,
-    key_name VARCHAR(128) NOT NULL,
+    application_id BIGINT REFERENCES applications(id) ON DELETE SET NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
     expires_at TIMESTAMP,
     rotated_from_id BIGINT REFERENCES api_keys(id) ON DELETE SET NULL,
+    allowed_ips VARCHAR(1024),
+    rate_limit_per_second BIGINT NOT NULL DEFAULT 100,
+    rate_limit_per_day BIGINT NOT NULL DEFAULT 8640000,
+    created_by VARCHAR(64),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

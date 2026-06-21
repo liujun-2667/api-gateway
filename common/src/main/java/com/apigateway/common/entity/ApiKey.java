@@ -47,6 +47,9 @@ public class ApiKey {
     @Column
     private LocalDateTime expiresAt;
 
+    @Column(name = "rotated_from_id")
+    private Long rotatedFromId;
+
     @Column(length = 1024)
     private String allowedIps;
 

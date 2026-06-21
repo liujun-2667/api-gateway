@@ -1,9 +1,9 @@
 package com.apigateway.gateway.service;
 
-import com.apigateway.common.entity.ApiKey;
-import com.apigateway.common.entity.Tenant;
-import com.apigateway.common.enums.ApiKeyStatus;
+import com.apigateway.gateway.entity.ApiKeyR2dbc;
+import com.apigateway.gateway.entity.TenantR2dbc;
 import com.apigateway.gateway.repository.ApiKeyRepository;
+import com.apigateway.gateway.repository.TenantRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +23,7 @@ public class TenantKeyService {
     private static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
     private final ApiKeyRepository apiKeyRepository;
+    private final TenantRepository tenantRepository;
     private final ReactiveStringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -34,14 +35,25 @@ public class TenantKeyService {
         String cacheKey = CACHE_PREFIX + apiKey;
         return redisTemplate.opsForValue().get(cacheKey)
                 .flatMap(this::deserialize)
-                .switchIfEmpty(loadFromDatabase(apiKey))
+                .switchIfEmpty(Mono.defer(() -> loadFromDatabase(apiKey)))
                 .filter(this::isValid)
-                .doOnNext(info -> log.debug("API Key validated: keyId={}, tenantId={}", info.getKeyId(), info.getTenantId()));
+                .doOnNext(info -> log.debug("API Key validated: keyId={}, tenantId={}", info.getKeyId(), info.getTenantId()))
+                .onErrorResume(e -> {
+                    log.error("Error validating API key", e);
+                    return Mono.empty();
+                });
     }
 
     private Mono<TenantKeyInfo> loadFromDatabase(String apiKey) {
-        return Mono.justOrEmpty(apiKeyRepository.findByApiKeyAndStatusWithTenant(apiKey, ApiKeyStatus.ACTIVE))
-                .map(this::toTenantKeyInfo)
+        return apiKeyRepository.findByApiKey(apiKey)
+                .flatMap(apiKeyEntity -> {
+                    if (apiKeyEntity.getTenantId() != null) {
+                        return tenantRepository.findById(apiKeyEntity.getTenantId())
+                                .map(tenant -> TenantKeyInfo.from(apiKeyEntity, tenant))
+                                .defaultIfEmpty(TenantKeyInfo.from(apiKeyEntity, null));
+                    }
+                    return Mono.just(TenantKeyInfo.from(apiKeyEntity, null));
+                })
                 .flatMap(info -> cacheApiKey(apiKey, info).thenReturn(info));
     }
 
@@ -54,14 +66,14 @@ public class TenantKeyService {
         }
     }
 
-    private Mono<String> cacheApiKey(String apiKey, TenantKeyInfo info) {
+    private Mono<Boolean> cacheApiKey(String apiKey, TenantKeyInfo info) {
         try {
             String json = objectMapper.writeValueAsString(info);
             String cacheKey = CACHE_PREFIX + apiKey;
             return redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL);
         } catch (Exception e) {
             log.error("Failed to cache API key info", e);
-            return Mono.empty();
+            return Mono.just(false);
         }
     }
 
@@ -69,7 +81,7 @@ public class TenantKeyService {
         if (info == null) {
             return false;
         }
-        if (!ApiKeyStatus.ACTIVE.name().equals(info.getStatus())) {
+        if (!"ACTIVE".equals(info.getStatus())) {
             return false;
         }
         if (!Boolean.TRUE.equals(info.getTenantEnabled())) {
@@ -79,24 +91,6 @@ public class TenantKeyService {
             return false;
         }
         return true;
-    }
-
-    private TenantKeyInfo toTenantKeyInfo(ApiKey apiKey) {
-        Tenant tenant = apiKey.getTenant();
-        return TenantKeyInfo.builder()
-                .apiKeyId(apiKey.getId())
-                .keyId(apiKey.getKeyId())
-                .apiKey(apiKey.getApiKey())
-                .tenantId(tenant != null ? tenant.getId() : null)
-                .tenantName(tenant != null ? tenant.getName() : null)
-                .tenantEnabled(tenant != null ? tenant.getEnabled() : false)
-                .applicationId(apiKey.getApplication() != null ? apiKey.getApplication().getId() : null)
-                .status(apiKey.getStatus().name())
-                .expiresAt(apiKey.getExpiresAt())
-                .allowedIps(apiKey.getAllowedIps())
-                .rateLimitPerSecond(apiKey.getRateLimitPerSecond())
-                .rateLimitPerDay(apiKey.getRateLimitPerDay())
-                .build();
     }
 
     public Mono<Void> evictCache(String apiKey) {

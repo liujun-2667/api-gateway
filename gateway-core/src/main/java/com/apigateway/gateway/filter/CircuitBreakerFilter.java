@@ -44,7 +44,7 @@ public class CircuitBreakerFilter implements GlobalFilter, Ordered {
         }
 
         Long routeId = null;
-        Long tenantId = null;
+        Long appId = null;
         Boolean cbEnabled = null;
 
         if (route.getMetadata() != null) {
@@ -52,9 +52,9 @@ public class CircuitBreakerFilter implements GlobalFilter, Ordered {
             if (routeRuleIdObj != null) {
                 routeId = ((Number) routeRuleIdObj).longValue();
             }
-            Object tenantIdObj = route.getMetadata().get("tenantId");
-            if (tenantIdObj != null) {
-                tenantId = ((Number) tenantIdObj).longValue();
+            Object appIdObj = route.getMetadata().get("appId");
+            if (appIdObj != null) {
+                appId = ((Number) appIdObj).longValue();
             }
             cbEnabled = (Boolean) route.getMetadata().get("circuitBreakerEnabled");
         }
@@ -64,13 +64,13 @@ public class CircuitBreakerFilter implements GlobalFilter, Ordered {
         }
 
         Long finalRouteId = routeId;
-        Long finalTenantId = tenantId;
-        CircuitBreaker circuitBreaker = circuitBreakerService.getCircuitBreakerForRoute(finalRouteId, finalTenantId);
+        Long finalAppId = appId;
+        CircuitBreaker circuitBreaker = circuitBreakerService.getCircuitBreakerForRoute(finalRouteId, finalAppId);
 
         if (circuitBreaker.getState() == CircuitBreaker.State.OPEN
                 || circuitBreaker.getState() == CircuitBreaker.State.FORCED_OPEN) {
             log.warn("Circuit breaker is OPEN for route: {}", finalRouteId);
-            return buildServiceUnavailableResponse(exchange, finalRouteId, finalTenantId);
+            return buildServiceUnavailableResponse(exchange, finalRouteId, finalAppId);
         }
 
         long startTime = System.nanoTime();
@@ -82,31 +82,31 @@ public class CircuitBreakerFilter implements GlobalFilter, Ordered {
                         int statusCode = exchange.getResponse().getStatusCode() != null
                                 ? exchange.getResponse().getStatusCode().value() : 200;
                         if (statusCode >= 500) {
-                            circuitBreaker.onError(duration, java.util.concurrent.TimeUnit.NANOSECONDS,
+                            circuitBreakerService.recordFailure(circuitBreaker.getName(), duration,
                                     new RuntimeException("Server error: " + statusCode));
                         } else {
-                            circuitBreaker.onSuccess(duration, java.util.concurrent.TimeUnit.NANOSECONDS);
+                            circuitBreakerService.recordSuccess(circuitBreaker.getName(), duration);
                         }
                     } else {
-                        circuitBreaker.onSuccess(duration, java.util.concurrent.TimeUnit.NANOSECONDS);
+                        circuitBreakerService.recordSuccess(circuitBreaker.getName(), duration);
                     }
                 })
                 .doOnError(throwable -> {
                     long duration = System.nanoTime() - startTime;
-                    circuitBreaker.onError(duration, java.util.concurrent.TimeUnit.NANOSECONDS, throwable);
+                    circuitBreakerService.recordFailure(circuitBreaker.getName(), duration, throwable);
                     log.error("Request failed for route: {}", finalRouteId, throwable);
                 });
     }
 
-    private Mono<Void> buildServiceUnavailableResponse(ServerWebExchange exchange, Long routeId, Long tenantId) {
+    private Mono<Void> buildServiceUnavailableResponse(ServerWebExchange exchange, Long routeId, Long appId) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
-        String fallbackUrl = circuitBreakerService.getFallbackUrl(routeId, tenantId);
+        String fallbackBody = circuitBreakerService.getFallbackResponseBodyForRoute(routeId, appId);
         String body;
-        if (fallbackUrl != null && !fallbackUrl.isEmpty()) {
-            body = String.format("{\"code\":503,\"message\":\"Service temporarily unavailable\",\"fallbackUrl\":\"%s\"}", fallbackUrl);
+        if (fallbackBody != null && !fallbackBody.isEmpty()) {
+            body = fallbackBody;
         } else {
             body = "{\"code\":503,\"message\":\"Service temporarily unavailable, please try again later\"}";
         }

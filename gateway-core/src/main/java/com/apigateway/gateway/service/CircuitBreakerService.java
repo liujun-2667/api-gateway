@@ -1,9 +1,10 @@
 package com.apigateway.gateway.service;
 
-import com.apigateway.common.entity.CircuitBreakerConfig;
+import com.apigateway.gateway.entity.CircuitBreakerConfigR2dbc;
 import com.apigateway.gateway.repository.CircuitBreakerConfigRepository;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +13,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -24,8 +24,8 @@ public class CircuitBreakerService {
     private final CircuitBreakerConfigRepository circuitBreakerConfigRepository;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
 
-    private final Map<String, CircuitBreakerConfig> routeConfigs = new ConcurrentHashMap<>();
-    private final Map<String, CircuitBreakerConfig> tenantConfigs = new ConcurrentHashMap<>();
+    private final Map<String, CircuitBreakerConfigR2dbc> upstreamConfigs = new ConcurrentHashMap<>();
+    private final Map<String, CircuitBreakerConfigR2dbc> appConfigs = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void init() {
@@ -34,45 +34,47 @@ public class CircuitBreakerService {
 
     @Scheduled(fixedDelay = 60000)
     public void refreshConfigs() {
-        try {
-            List<CircuitBreakerConfig> configs = circuitBreakerConfigRepository.findAllEnabledWithTenant();
-            routeConfigs.clear();
-            tenantConfigs.clear();
-            for (CircuitBreakerConfig config : configs) {
-                if (config.getRouteRule() != null) {
-                    String routeKey = "route:" + config.getRouteRule().getId();
-                    routeConfigs.put(routeKey, config);
-                    createOrUpdateCircuitBreaker(routeKey, config);
-                }
-                if (config.getTenant() != null) {
-                    String tenantKey = "tenant:" + config.getTenant().getId();
-                    tenantConfigs.put(tenantKey, config);
-                    createOrUpdateCircuitBreaker(tenantKey, config);
-                }
-            }
-            log.info("Circuit breaker configs refreshed: tenant={}, route={}",
-                    tenantConfigs.size(), routeConfigs.size());
-        } catch (Exception e) {
-            log.error("Failed to refresh circuit breaker configs", e);
-        }
+        circuitBreakerConfigRepository.findAll()
+                .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
+                .collectList()
+                .doOnSuccess(configs -> {
+                    upstreamConfigs.clear();
+                    appConfigs.clear();
+
+                    for (CircuitBreakerConfigR2dbc config : configs) {
+                        if (config.getUpstreamService() != null && !config.getUpstreamService().isEmpty()) {
+                            String upstreamKey = "upstream:" + config.getUpstreamService();
+                            upstreamConfigs.put(upstreamKey, config);
+                            createOrUpdateCircuitBreaker(config.getUpstreamService(), config);
+                        }
+                        if (config.getAppId() != null) {
+                            String appKey = "app:" + config.getAppId();
+                            appConfigs.put(appKey, config);
+                        }
+                    }
+
+                    log.info("Circuit breaker configs refreshed: upstream={}, app={}",
+                            upstreamConfigs.size(), appConfigs.size());
+                })
+                .doOnError(e -> log.error("Failed to refresh circuit breaker configs", e))
+                .subscribe();
     }
 
-    private void createOrUpdateCircuitBreaker(String name, CircuitBreakerConfig config) {
+    private void createOrUpdateCircuitBreaker(String name, CircuitBreakerConfigR2dbc config) {
         try {
             io.github.resilience4j.circuitbreaker.CircuitBreakerConfig cbConfig = io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.custom()
-                    .failureRateThreshold(config.getFailureRateThreshold())
-                    .slowCallRateThreshold(config.getSlowCallRateThreshold())
-                    .slowCallDurationThreshold(Duration.ofMillis(config.getSlowCallDurationThreshold()))
-                    .permittedNumberOfCallsInHalfOpenState(config.getPermittedNumberOfCallsInHalfOpenState())
-                    .slidingWindowSize(config.getSlidingWindowSize())
-                    .slidingWindowType(io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.SlidingWindowType.valueOf(config.getSlidingWindowType().toUpperCase()))
-                    .minimumNumberOfCalls(config.getMinimumNumberOfCalls())
-                    .waitDurationInOpenState(Duration.ofMillis(config.getWaitDurationInOpenState()))
+                    .failureRateThreshold(config.getFailureRateThreshold() != null ? config.getFailureRateThreshold() : 50.0f)
+                    .slidingWindowSize(config.getSlidingWindowSize() != null ? config.getSlidingWindowSize() : 100)
+                    .minimumNumberOfCalls(config.getMinimumNumberOfCalls() != null ? config.getMinimumNumberOfCalls() : 10)
+                    .waitDurationInOpenState(Duration.ofMillis(config.getWaitDurationInOpenStateMs() != null ? config.getWaitDurationInOpenStateMs() : 60000))
+                    .permittedNumberOfCallsInHalfOpenState(config.getPermittedNumberOfCallsInHalfOpenState() != null ? config.getPermittedNumberOfCallsInHalfOpenState() : 10)
                     .recordExceptions(Exception.class)
                     .build();
 
             CircuitBreaker existing = circuitBreakerRegistry.getAllCircuitBreakers()
-                    .find(cb -> cb.getName().equals(name))
+                    .stream()
+                    .filter(cb -> cb.getName().equals(name))
+                    .findFirst()
                     .orElse(null);
 
             if (existing == null) {
@@ -87,58 +89,102 @@ public class CircuitBreakerService {
         }
     }
 
-    public CircuitBreaker getCircuitBreakerForRoute(Long routeId, Long tenantId) {
-        String routeKey = "route:" + routeId;
-        CircuitBreakerConfig config = routeConfigs.get(routeKey);
-        if (config == null && tenantId != null) {
-            config = circuitBreakerConfigRepository.findByTenantIdAndRouteRuleIdAndEnabled(tenantId, routeId).orElse(null);
-            if (config != null) {
-                routeConfigs.put(routeKey, config);
-                createOrUpdateCircuitBreaker(routeKey, config);
+    public CircuitBreaker getCircuitBreaker(String name) {
+        return circuitBreakerRegistry.circuitBreaker(name);
+    }
+
+    public CircuitBreaker getCircuitBreakerForUpstream(String upstreamService) {
+        String upstreamKey = "upstream:" + upstreamService;
+        if (upstreamConfigs.containsKey(upstreamKey)) {
+            return circuitBreakerRegistry.circuitBreaker(upstreamService);
+        }
+        return getDefaultCircuitBreaker();
+    }
+
+    public CircuitBreaker getCircuitBreakerForRoute(Long routeId, Long appId) {
+        if (appId != null) {
+            String appKey = "app:" + appId;
+            CircuitBreakerConfigR2dbc config = appConfigs.get(appKey);
+            if (config != null && config.getUpstreamService() != null) {
+                return circuitBreakerRegistry.circuitBreaker(config.getUpstreamService());
             }
         }
-        if (config != null) {
-            return circuitBreakerRegistry.circuitBreaker(routeKey);
-        }
-        String tenantKey = "tenant:" + tenantId;
-        if (tenantConfigs.containsKey(tenantKey)) {
-            return circuitBreakerRegistry.circuitBreaker(tenantKey);
-        }
+        return getDefaultCircuitBreaker();
+    }
+
+    private CircuitBreaker getDefaultCircuitBreaker() {
         return circuitBreakerRegistry.circuitBreaker("default");
     }
 
-    public Mono<Boolean> isCircuitBreakerOpen(Long routeId, Long tenantId) {
+    public Mono<Boolean> isCircuitBreakerOpen(String name) {
         return Mono.fromCallable(() -> {
-            CircuitBreaker circuitBreaker = getCircuitBreakerForRoute(routeId, tenantId);
+            CircuitBreaker circuitBreaker = getCircuitBreaker(name);
             CircuitBreaker.State state = circuitBreaker.getState();
-            log.debug("Circuit breaker state for route {}: {}", routeId, state);
+            log.debug("Circuit breaker state for {}: {}", name, state);
             return state == CircuitBreaker.State.OPEN || state == CircuitBreaker.State.FORCED_OPEN;
         });
     }
 
-    public void recordSuccess(Long routeId, Long tenantId) {
-        CircuitBreaker circuitBreaker = getCircuitBreakerForRoute(routeId, tenantId);
-        circuitBreaker.onSuccess(0, java.util.concurrent.TimeUnit.NANOSECONDS);
+    public <T> Mono<T> executeWithCircuitBreaker(String name, Mono<T> mono, Mono<T> fallback) {
+        CircuitBreaker circuitBreaker = getCircuitBreaker(name);
+        return mono
+                .transform(CircuitBreakerOperator.of(circuitBreaker))
+                .onErrorResume(throwable -> {
+                    if (throwable instanceof io.github.resilience4j.circuitbreaker.CallNotPermittedException) {
+                        log.warn("Circuit breaker is OPEN for: {}", name);
+                        return fallback != null ? fallback : Mono.error(throwable);
+                    }
+                    return Mono.error(throwable);
+                });
     }
 
-    public void recordFailure(Long routeId, Long tenantId, Throwable throwable) {
-        CircuitBreaker circuitBreaker = getCircuitBreakerForRoute(routeId, tenantId);
-        circuitBreaker.onError(0, java.util.concurrent.TimeUnit.NANOSECONDS, throwable);
-    }
-
-    public String getFallbackUrl(Long routeId, Long tenantId) {
-        String routeKey = "route:" + routeId;
-        CircuitBreakerConfig config = routeConfigs.get(routeKey);
-        if (config != null && config.getFallbackUrl() != null && !config.getFallbackUrl().isEmpty()) {
-            return config.getFallbackUrl();
+    public void recordSuccess(String name, long durationNanos) {
+        try {
+            CircuitBreaker circuitBreaker = getCircuitBreaker(name);
+            circuitBreaker.onSuccess(durationNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (Exception e) {
+            log.debug("Error recording success for circuit breaker: {}", name, e);
         }
-        if (tenantId != null) {
-            String tenantKey = "tenant:" + tenantId;
-            config = tenantConfigs.get(tenantKey);
-            if (config != null) {
-                return config.getFallbackUrl();
+    }
+
+    public void recordFailure(String name, long durationNanos, Throwable throwable) {
+        try {
+            CircuitBreaker circuitBreaker = getCircuitBreaker(name);
+            circuitBreaker.onError(durationNanos, java.util.concurrent.TimeUnit.NANOSECONDS, throwable);
+        } catch (Exception e) {
+            log.debug("Error recording failure for circuit breaker: {}", name, e);
+        }
+    }
+
+    public String getFallbackResponseBody(String name) {
+        String upstreamKey = "upstream:" + name;
+        CircuitBreakerConfigR2dbc config = upstreamConfigs.get(upstreamKey);
+        if (config != null && config.getFallbackResponseBody() != null && !config.getFallbackResponseBody().isEmpty()) {
+            return config.getFallbackResponseBody();
+        }
+        return null;
+    }
+
+    public String getFallbackResponseBodyForRoute(Long routeId, Long appId) {
+        if (appId != null) {
+            String appKey = "app:" + appId;
+            CircuitBreakerConfigR2dbc config = appConfigs.get(appKey);
+            if (config != null && config.getFallbackResponseBody() != null) {
+                return config.getFallbackResponseBody();
             }
         }
         return null;
+    }
+
+    public Map<String, CircuitBreakerConfigR2dbc> getUpstreamConfigs() {
+        return Map.copyOf(upstreamConfigs);
+    }
+
+    public Map<String, CircuitBreakerConfigR2dbc> getAppConfigs() {
+        return Map.copyOf(appConfigs);
+    }
+
+    public CircuitBreaker.State getCircuitBreakerState(String name) {
+        return getCircuitBreaker(name).getState();
     }
 }
