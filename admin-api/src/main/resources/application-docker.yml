@@ -1,0 +1,54 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: admin-api
+  datasource:
+    url: jdbc:postgresql://postgres:5432/apigateway
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: redis123
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+  sql:
+    init:
+      mode: always
+
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForApiGatewayAdminMustBeAtLeast256BitsLongForSecurity}
+  expiration: 86400000
+  header: Authorization
+  prefix: "Bearer "
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.apigateway.admin: DEBUG
+    org.springframework.security: INFO

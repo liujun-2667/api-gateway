@@ -1,0 +1,93 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  datasource:
+    url: jdbc:postgresql://localhost:5432/apigateway
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway,metrics,prometheus,env
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      default:
+        register-health-indicator: true
+        sliding-window-type: count_based
+        sliding-window-size: 100
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 10
+        slow-call-duration-threshold: 5s
+        slow-call-rate-threshold: 50
+        minimum-number-of-calls: 20
+        event-consumer-buffer-size: 10
+  retry:
+    instances:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2.0
+
+gateway:
+  rate-limit:
+    enabled: true
+    default-requests-per-second: 100
+    default-requests-per-minute: 1000
+    default-burst-capacity: 200
+  circuit-breaker:
+    enabled: true
+  request-logging:
+    enabled: true
+    redis-key-prefix: "gateway:request:log:"
+  metrics:
+    enabled: true
+    redis-key-prefix: "gateway:metrics:"

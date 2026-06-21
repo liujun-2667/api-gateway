@@ -1,0 +1,67 @@
+@use '@angular/material' as mat;
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: Roboto, 'Helvetica Neue', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.page-container {
+  padding: 24px;
+}
+
+.table-container {
+  overflow: auto;
+  max-height: 600px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.form-container {
+  display: flex;
+  flex-direction: column;
+  min-width: 400px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.form-row > * {
+  flex: 1;
+}
+
+.status-active {
+  color: #2e7d32;
+}
+
+.status-inactive {
+  color: #c62828;
+}
+
+.status-pending {
+  color: #f57c00;
+}
+
+.mat-mdc-card {
+  margin-bottom: 16px;
+}
+
+.chart-container {
+  position: relative;
+  height: 300px;
+}
