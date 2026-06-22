@@ -11,6 +11,7 @@ import { RateLimitsComponent } from './pages/rate-limits/rate-limits.component';
 import { CircuitBreakersComponent } from './pages/circuit-breakers/circuit-breakers.component';
 import { AuditLogsComponent } from './pages/audit-logs/audit-logs.component';
 import { MonitoringComponent } from './pages/monitoring/monitoring.component';
+import { IntegrationCenterComponent } from './pages/integration-center/integration-center.component';
 
 export const routes: Routes = [
   { path: 'login', component: LoginComponent },
@@ -28,7 +29,8 @@ export const routes: Routes = [
       { path: 'rate-limits', component: RateLimitsComponent },
       { path: 'circuit-breakers', component: CircuitBreakersComponent },
       { path: 'audit-logs', component: AuditLogsComponent },
-      { path: 'monitoring', component: MonitoringComponent }
+      { path: 'monitoring', component: MonitoringComponent },
+      { path: 'integration-center', component: IntegrationCenterComponent }
     ]
   },
   { path: '**', redirectTo: '' }

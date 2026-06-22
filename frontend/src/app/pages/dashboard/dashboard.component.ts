@@ -144,7 +144,8 @@ export class DashboardComponent implements OnInit {
     { path: 'rate-limits', label: '限流配置', icon: 'speed' },
     { path: 'circuit-breakers', label: '熔断配置', icon: 'power_off' },
     { path: 'audit-logs', label: '审计日志', icon: 'receipt_long' },
-    { path: 'monitoring', label: '实时监控', icon: 'monitoring' }
+    { path: 'monitoring', label: '实时监控', icon: 'monitoring' },
+    { path: 'integration-center', label: '联调中心', icon: 'hub' }
   ];
 
   private pageTitleMap: Record<string, string> = {
@@ -156,7 +157,8 @@ export class DashboardComponent implements OnInit {
     'rate-limits': '限流配置',
     'circuit-breakers': '熔断配置',
     'audit-logs': '审计日志',
-    'monitoring': '实时监控'
+    'monitoring': '实时监控',
+    'integration-center': '联调中心'
   };
 
   constructor(

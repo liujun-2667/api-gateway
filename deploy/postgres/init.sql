@@ -212,6 +212,92 @@ CREATE TABLE IF NOT EXISTS gray_releases (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- API文档表
+CREATE TABLE IF NOT EXISTS api_docs (
+    id BIGSERIAL PRIMARY KEY,
+    doc_id VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    version VARCHAR(32),
+    application_id BIGINT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+    created_by VARCHAR(64),
+    updated_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- API文档分组表
+CREATE TABLE IF NOT EXISTS api_doc_groups (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    doc_id BIGINT NOT NULL REFERENCES api_docs(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- API接口定义表
+CREATE TABLE IF NOT EXISTS api_endpoints (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    method VARCHAR(16) NOT NULL,
+    path VARCHAR(512) NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    group_id BIGINT NOT NULL REFERENCES api_doc_groups(id) ON DELETE CASCADE,
+    request_params JSON,
+    request_schema JSON,
+    response_schema JSON,
+    status_codes JSON,
+    deprecated VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Mock配置表
+CREATE TABLE IF NOT EXISTS mock_configs (
+    id BIGSERIAL PRIMARY KEY,
+    mock_config_id VARCHAR(64) NOT NULL UNIQUE,
+    endpoint_id BIGINT NOT NULL REFERENCES api_endpoints(id) ON DELETE CASCADE,
+    route_rule_id BIGINT REFERENCES route_rules(id) ON DELETE SET NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    delay_ms INTEGER NOT NULL DEFAULT 0,
+    fault_injection_percent INTEGER,
+    fault_error_code VARCHAR(16),
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 调试用例表
+CREATE TABLE IF NOT EXISTS debug_cases (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    endpoint_id BIGINT NOT NULL REFERENCES api_endpoints(id) ON DELETE CASCADE,
+    request_params JSON,
+    request_headers JSON,
+    request_body JSON,
+    expected_response JSON,
+    use_mock BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 接口变更记录表
+CREATE TABLE IF NOT EXISTS api_change_records (
+    id BIGSERIAL PRIMARY KEY,
+    endpoint_id BIGINT NOT NULL REFERENCES api_endpoints(id) ON DELETE CASCADE,
+    change_type VARCHAR(64) NOT NULL,
+    change_summary VARCHAR(128) NOT NULL,
+    change_details JSON,
+    changed_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================
 -- 索引创建
 -- ============================================
@@ -236,6 +322,15 @@ CREATE INDEX IF NOT EXISTS idx_gray_releases_gray_release_id ON gray_releases(gr
 CREATE INDEX IF NOT EXISTS idx_gray_releases_application_id ON gray_releases(application_id);
 CREATE INDEX IF NOT EXISTS idx_gray_releases_route_rule_id ON gray_releases(route_rule_id);
 CREATE INDEX IF NOT EXISTS idx_gray_releases_status ON gray_releases(status);
+CREATE INDEX IF NOT EXISTS idx_api_docs_application_id ON api_docs(application_id);
+CREATE INDEX IF NOT EXISTS idx_api_docs_status ON api_docs(status);
+CREATE INDEX IF NOT EXISTS idx_api_doc_groups_doc_id ON api_doc_groups(doc_id);
+CREATE INDEX IF NOT EXISTS idx_api_endpoints_group_id ON api_endpoints(group_id);
+CREATE INDEX IF NOT EXISTS idx_mock_configs_endpoint_id ON mock_configs(endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_mock_configs_route_rule_id ON mock_configs(route_rule_id);
+CREATE INDEX IF NOT EXISTS idx_debug_cases_endpoint_id ON debug_cases(endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_api_change_records_endpoint_id ON api_change_records(endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_api_change_records_created_at ON api_change_records(created_at);
 
 -- ============================================
 -- 初始数据

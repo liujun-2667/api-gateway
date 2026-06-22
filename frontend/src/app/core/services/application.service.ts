@@ -27,4 +27,8 @@ export class ApplicationService extends ApiService<Application> {
       params: { tenantId }
     });
   }
+
+  getAllApplications(): Observable<Application[]> {
+    return this.http.get<Application[]>(`${this.baseUrl}/${this.endpoint}`);
+  }
 }
