@@ -8,8 +8,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -73,6 +77,39 @@ public class RouteRuleVersion {
 
     @Column(length = 64)
     private String createdBy;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "json")
+    private List<TargetBackend> targetBackends;
+
+    @Column
+    private Integer connectTimeoutMs;
+
+    @Column
+    private Integer readTimeoutMs;
+
+    @Column
+    private Integer maxRetries;
+
+    @Column
+    private Boolean retryOn5xx;
+
+    @Column
+    private Boolean retryOnTimeout;
+
+    @Column
+    private Integer retryIntervalMs;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "json")
+    private Map<String, String> requestHeadersToAdd;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "json")
+    private List<String> requestHeadersToRemove;
+
+    @Column(length = 512)
+    private String pathPrefixReplacement;
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)

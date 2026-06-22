@@ -1,9 +1,11 @@
 package com.apigateway.admin.controller;
 
+import com.apigateway.common.dto.BatchOperationDTO;
 import com.apigateway.common.dto.PageResponse;
 import com.apigateway.common.dto.RouteRuleApprovalDTO;
 import com.apigateway.common.dto.RouteRuleDTO;
 import com.apigateway.common.dto.RouteRuleVersionDTO;
+import com.apigateway.common.dto.VersionDiffDTO;
 import com.apigateway.admin.service.ApprovalService;
 import com.apigateway.admin.service.RouteRuleService;
 import com.apigateway.admin.util.SecurityUtil;
@@ -86,6 +88,24 @@ public class RouteRuleController {
         return ResponseEntity.ok(routeRuleService.rollbackRouteRule(id, version));
     }
 
+    @PostMapping("/{id}/versions/compare")
+    public ResponseEntity<VersionDiffDTO.DiffResponse> compareVersions(
+            @PathVariable Long appId,
+            @PathVariable Long id,
+            @Valid @RequestBody VersionDiffDTO.DiffRequest request) {
+        return ResponseEntity.ok(routeRuleService.compareVersions(id, request.getVersion1Id(), request.getVersion2Id()));
+    }
+
+    @PostMapping("/{id}/rollback-with-reason")
+    public ResponseEntity<RouteRuleDTO.RouteRuleResponse> rollbackRouteRuleWithReason(
+            @PathVariable Long appId,
+            @PathVariable Long id,
+            @RequestParam Integer version,
+            @RequestParam String reason) {
+        String operator = securityUtil.getCurrentUsername();
+        return ResponseEntity.ok(routeRuleService.rollbackRouteRuleWithReason(id, version, reason, operator));
+    }
+
     @GetMapping("/{id}/approvals")
     public ResponseEntity<List<RouteRuleApprovalDTO.RouteRuleApprovalResponse>> getApprovals(
             @PathVariable Long appId, @PathVariable Long id) {
@@ -117,6 +137,14 @@ public class RouteRuleController {
             @RequestBody(required = false) Map<String, String> body) {
         String comment = body != null ? body.get("comment") : null;
         return ResponseEntity.ok(approvalService.emergencyPublish(id, comment));
+    }
+
+    @PostMapping("/batch")
+    public ResponseEntity<BatchOperationDTO.BatchOperationResponse> batchOperation(
+            @PathVariable Long appId,
+            @Valid @RequestBody BatchOperationDTO.BatchOperationRequest request) {
+        String operator = securityUtil.getCurrentUsername();
+        return ResponseEntity.ok(routeRuleService.batchOperation(appId, request, operator));
     }
 
     private Sort.Order[] parseSort(String[] sort) {

@@ -14,6 +14,8 @@ public interface RouteRuleVersionRepository extends JpaRepository<RouteRuleVersi
 
     List<RouteRuleVersion> findByRouteRuleIdOrderByVersionDesc(Long routeRuleId);
 
+    List<RouteRuleVersion> findTop10ByRouteRuleIdOrderByVersionDesc(Long routeRuleId);
+
     Optional<RouteRuleVersion> findFirstByRouteRuleIdOrderByVersionDesc(Long routeRuleId);
 
     Optional<RouteRuleVersion> findByRouteRuleIdAndVersion(Long routeRuleId, Integer version);

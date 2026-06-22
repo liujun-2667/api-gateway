@@ -224,4 +224,97 @@ public class MetricsService {
         if (index > sorted.size()) index = sorted.size();
         return Math.round(sorted.get(index - 1) * 100) / 100.0;
     }
+
+    private String buildRouteKey(String prefix, Long routeRuleId, String window) {
+        return prefix + "route:" + routeRuleId + ":" + window;
+    }
+
+    public Double getRouteErrorRate(Long routeRuleId, Integer minutes) {
+        int windowMinutes = minutes != null ? minutes : 5;
+        List<String> timeWindows = generateTimeWindows(windowMinutes);
+
+        long totalRequests = 0;
+        long errorRequests = 0;
+
+        for (String window : timeWindows) {
+            String pattern = buildRouteKey(STATUS_KEY, routeRuleId, window) + "*";
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys != null) {
+                for (String key : keys) {
+                    String statusCode = extractStatusCode(key);
+                    Long count = redisTemplate.opsForHyperLogLog().size(key);
+                    if (count != null && count > 0) {
+                        totalRequests += count;
+                        if (statusCode.startsWith("5")) {
+                            errorRequests += count;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (totalRequests == 0) {
+            return 0.0;
+        }
+
+        return Math.round((errorRequests * 100.0 / totalRequests) * 100) / 100.0;
+    }
+
+    public Map<String, Object> getRouteMetrics(Long routeRuleId, Integer minutes) {
+        int windowMinutes = minutes != null ? minutes : 5;
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<String> timeWindows = generateTimeWindows(windowMinutes);
+
+        long totalRequests = 0;
+        List<Long> qpsValues = new ArrayList<>();
+
+        for (String window : timeWindows) {
+            String qpsKey = buildRouteKey(QPS_KEY, routeRuleId, window);
+            Long count = redisTemplate.opsForHyperLogLog().size(qpsKey);
+            long windowQps = count != null ? count : 0L;
+            qpsValues.add(windowQps);
+            totalRequests += windowQps;
+        }
+
+        double avgQps = qpsValues.isEmpty() ? 0 : (double) totalRequests / qpsValues.size();
+        long peakQps = qpsValues.stream().mapToLong(Long::longValue).max().orElse(0L);
+
+        Double errorRate = getRouteErrorRate(routeRuleId, windowMinutes);
+
+        double overallSum = 0;
+        long overallCount = 0;
+        List<Double> allLatencies = new ArrayList<>();
+
+        for (String window : timeWindows) {
+            String latencyKey = buildRouteKey(LATENCY_KEY, routeRuleId, window);
+            List<Object> rawList = redisTemplate.opsForList().range(latencyKey, 0, -1);
+            List<Double> latencies = new ArrayList<>();
+            if (rawList != null) {
+                for (Object obj : rawList) {
+                    try {
+                        latencies.add(Double.parseDouble(obj.toString()));
+                    } catch (NumberFormatException e) {
+                    }
+                }
+            }
+            overallSum += latencies.stream().mapToDouble(Double::doubleValue).sum();
+            overallCount += latencies.size();
+            allLatencies.addAll(latencies);
+        }
+
+        double avgLatency = overallCount > 0 ? overallSum / overallCount : 0;
+        double p95Latency = calculatePercentile(allLatencies, 95);
+        double p99Latency = calculatePercentile(allLatencies, 99);
+
+        result.put("qps", Math.round(avgQps * 100) / 100.0);
+        result.put("peakQps", peakQps);
+        result.put("totalRequests", totalRequests);
+        result.put("errorRate", errorRate);
+        result.put("avgLatency", Math.round(avgLatency * 100) / 100.0);
+        result.put("p95Latency", p95Latency);
+        result.put("p99Latency", p99Latency);
+        result.put("windowMinutes", windowMinutes);
+
+        return result;
+    }
 }

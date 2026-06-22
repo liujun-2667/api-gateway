@@ -184,6 +184,34 @@ CREATE TABLE IF NOT EXISTS quota_schedules (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 灰度发布表
+CREATE TABLE IF NOT EXISTS gray_releases (
+    id BIGSERIAL PRIMARY KEY,
+    gray_release_id VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    application_id BIGINT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    route_rule_id BIGINT NOT NULL REFERENCES route_rules(id) ON DELETE CASCADE,
+    color_rule_id BIGINT REFERENCES traffic_color_rules(id) ON DELETE SET NULL,
+    status VARCHAR(32) NOT NULL,
+    current_phase VARCHAR(32),
+    current_traffic_percent INTEGER,
+    initial_percent INTEGER NOT NULL,
+    release_stages_json JSON,
+    observation_minutes_per_stage INTEGER NOT NULL,
+    error_rate_threshold DOUBLE PRECISION NOT NULL DEFAULT 5.0,
+    current_error_rate DOUBLE PRECISION,
+    phase_start_time TIMESTAMP,
+    next_stage_time TIMESTAMP,
+    total_stages INTEGER,
+    completed_stages INTEGER,
+    created_by VARCHAR(64),
+    updated_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================
 -- 索引创建
 -- ============================================
@@ -204,6 +232,10 @@ CREATE INDEX IF NOT EXISTS idx_circuit_breaker_configs_app_id ON circuit_breaker
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_operator_id ON audit_logs(operator_id);
 CREATE INDEX IF NOT EXISTS idx_quota_schedules_tenant_id ON quota_schedules(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_gray_releases_gray_release_id ON gray_releases(gray_release_id);
+CREATE INDEX IF NOT EXISTS idx_gray_releases_application_id ON gray_releases(application_id);
+CREATE INDEX IF NOT EXISTS idx_gray_releases_route_rule_id ON gray_releases(route_rule_id);
+CREATE INDEX IF NOT EXISTS idx_gray_releases_status ON gray_releases(status);
 
 -- ============================================
 -- 初始数据

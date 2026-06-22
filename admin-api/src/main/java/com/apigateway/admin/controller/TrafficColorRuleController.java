@@ -1,6 +1,8 @@
 package com.apigateway.admin.controller;
 
+import com.apigateway.common.dto.GrayReleaseDTO;
 import com.apigateway.common.dto.TrafficColorRuleDTO;
+import com.apigateway.admin.service.GrayReleaseService;
 import com.apigateway.admin.service.TrafficColorRuleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +19,7 @@ import java.util.Map;
 public class TrafficColorRuleController {
 
     private final TrafficColorRuleService trafficColorRuleService;
+    private final GrayReleaseService grayReleaseService;
 
     @GetMapping
     public ResponseEntity<List<TrafficColorRuleDTO.TrafficColorRuleResponse>> getTrafficColorRules(@PathVariable Long appId) {
@@ -72,5 +75,10 @@ public class TrafficColorRuleController {
             @RequestParam Long tenantId) {
         int count = trafficColorRuleService.clearAllRules(tenantId);
         return ResponseEntity.ok(Map.of("deleted", count));
+    }
+
+    @GetMapping("/gray-releases")
+    public ResponseEntity<List<GrayReleaseDTO.GrayReleaseResponse>> getActiveGrayReleases(@PathVariable Long appId) {
+        return ResponseEntity.ok(grayReleaseService.getActiveGrayReleases());
     }
 }

@@ -28,6 +28,9 @@ import { MatExpansionModule } from '@angular/material/expansion';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
+import { MatStepperModule } from '@angular/material/stepper';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatGridListModule } from '@angular/material/grid-list';
 import { ReactiveFormsModule, FormsModule } from '@angular/forms';
 
 const materialModules = [
@@ -58,7 +61,10 @@ const materialModules = [
   MatExpansionModule,
   MatDividerModule,
   MatChipsModule,
-  MatAutocompleteModule
+  MatAutocompleteModule,
+  MatStepperModule,
+  MatProgressBarModule,
+  MatGridListModule
 ];
 
 @NgModule({

@@ -9,5 +9,6 @@ public enum TrafficConditionType {
     USER_AGENT,
     TENANT_ID,
     USER_ID,
-    API_KEY
+    API_KEY,
+    RANDOM_PERCENTAGE
 }

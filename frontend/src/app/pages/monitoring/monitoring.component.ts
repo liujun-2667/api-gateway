@@ -9,6 +9,7 @@ import {
   ChartOptions
 } from 'chart.js';
 import { MetricsService } from '../../core/services/metrics.service';
+import { GrayReleaseService } from '../../core/services/gray-release.service';
 import {
   DashboardMetrics,
   QpsMetrics,
@@ -16,13 +17,22 @@ import {
   LatencyMetrics,
   TenantMetrics
 } from '../../shared/models/metrics.model';
+import {
+  GrayRelease,
+  GrayReleaseStatus,
+  GrayReleaseActionRequest
+} from '../../shared/models/gray-release.model';
+import { GrayReleaseStatusCardComponent } from '../color-rules/color-rules.component';
+import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog/confirm-dialog.component';
+import { MatDialog } from '@angular/material/dialog';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 
 @Component({
   selector: 'app-monitoring',
   standalone: true,
-  imports: [CommonModule, MaterialModule, PageHeaderComponent, NgChartsModule],
+  imports: [CommonModule, MaterialModule, PageHeaderComponent, NgChartsModule, GrayReleaseStatusCardComponent],
   template: `
     <app-page-header title="实时监控" subtitle="API网关运行状态实时监控面板" icon="monitoring">
       <button mat-raised-button (click)="toggleAutoRefresh()" [color]="autoRefresh ? 'warn' : 'primary'">
@@ -33,6 +43,25 @@ import { switchMap } from 'rxjs/operators';
         <mat-icon>refresh</mat-icon>
       </button>
     </app-page-header>
+
+    <div class="gray-release-section">
+      <h3 class="section-title">
+        <mat-icon color="primary">trending_up</mat-icon>
+        灰度发布状态 ({{ activeGrayReleases.length }})
+      </h3>
+      <div *ngIf="activeGrayReleases.length > 0" class="gray-release-grid">
+        <app-gray-release-status-card
+          *ngFor="let release of activeGrayReleases"
+          [grayRelease]="release"
+          (fullRelease)="onFullRelease($event)"
+          (rollback)="onRollback($event)"
+        ></app-gray-release-status-card>
+      </div>
+      <div *ngIf="activeGrayReleases.length === 0" class="empty-state">
+        <mat-icon>inbox</mat-icon>
+        <p>没有进行中的灰度发布</p>
+      </div>
+    </div>
 
     <div class="stats-grid">
       <mat-card class="stat-card">
@@ -136,6 +165,41 @@ import { switchMap } from 'rxjs/operators';
     </div>
   `,
   styles: [`
+    .gray-release-section {
+      margin-bottom: 24px;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 16px 0;
+      font-size: 18px;
+      font-weight: 500;
+      color: #333;
+    }
+    .gray-release-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+      gap: 16px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: #999;
+      background: #fafafa;
+      border-radius: 8px;
+      border: 1px dashed #e0e0e0;
+    }
+    .empty-state mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      margin-bottom: 8px;
+    }
+    .empty-state p {
+      margin: 0;
+      font-size: 14px;
+    }
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -179,13 +243,18 @@ import { switchMap } from 'rxjs/operators';
       .charts-grid {
         grid-template-columns: 1fr;
       }
+      .gray-release-grid {
+        grid-template-columns: 1fr;
+      }
     }
   `]
 })
 export class MonitoringComponent implements OnInit, OnDestroy {
   dashboardMetrics: DashboardMetrics | null = null;
+  activeGrayReleases: GrayRelease[] = [];
   autoRefresh = true;
   private refreshSubscription?: Subscription;
+  private grayRefreshSubscription?: Subscription;
 
   qpsChartData: ChartData<'line'> = {
     labels: [],
@@ -278,10 +347,16 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     }
   };
 
-  constructor(private metricsService: MetricsService) {}
+  constructor(
+    private metricsService: MetricsService,
+    private grayReleaseService: GrayReleaseService,
+    private dialog: MatDialog,
+    private snackBar: MatSnackBar
+  ) {}
 
   ngOnInit(): void {
     this.loadData();
+    this.loadActiveGrayReleases();
     this.startAutoRefresh();
   }
 
@@ -293,12 +368,20 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     this.refreshSubscription = interval(10000)
       .pipe(switchMap(() => this.metricsService.getDashboardMetrics()))
       .subscribe(metrics => this.updateMetrics(metrics));
+
+    this.grayRefreshSubscription = interval(10000)
+      .pipe(switchMap(() => this.grayReleaseService.getActiveGrayReleases()))
+      .subscribe(releases => this.activeGrayReleases = releases);
   }
 
   stopAutoRefresh(): void {
     if (this.refreshSubscription) {
       this.refreshSubscription.unsubscribe();
       this.refreshSubscription = undefined;
+    }
+    if (this.grayRefreshSubscription) {
+      this.grayRefreshSubscription.unsubscribe();
+      this.grayRefreshSubscription = undefined;
     }
   }
 
@@ -314,6 +397,12 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   loadData(): void {
     this.metricsService.getDashboardMetrics().subscribe(metrics => {
       this.updateMetrics(metrics);
+    });
+  }
+
+  loadActiveGrayReleases(): void {
+    this.grayReleaseService.getActiveGrayReleases().subscribe(releases => {
+      this.activeGrayReleases = releases;
     });
   }
 
@@ -416,5 +505,67 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     } catch {
       return timestamp;
     }
+  }
+
+  onFullRelease(release: GrayRelease): void {
+    if (!release.appId || !release.id) {
+      this.snackBar.open('无效的灰度发布数据', '关闭', { duration: 5000 });
+      return;
+    }
+    const ref = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: '确认立即全量',
+        message: `确定要将灰度发布 "${release.name}" 立即全量发布到 100% 流量吗？`,
+        confirmText: '立即全量'
+      }
+    });
+    ref.afterClosed().subscribe(r => {
+      if (r) {
+        const request: GrayReleaseActionRequest = {
+          action: 'FULL',
+          reason: '手动立即全量'
+        };
+        this.grayReleaseService.performAction(release.appId, release.id, request).subscribe({
+          next: () => {
+            this.snackBar.open('已执行全量发布', '关闭', { duration: 3000 });
+            this.loadActiveGrayReleases();
+          },
+          error: (err) => {
+            this.snackBar.open('全量发布失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+          }
+        });
+      }
+    });
+  }
+
+  onRollback(release: GrayRelease): void {
+    if (!release.appId || !release.id) {
+      this.snackBar.open('无效的灰度发布数据', '关闭', { duration: 5000 });
+      return;
+    }
+    const ref = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: '确认立即回滚',
+        message: `确定要将灰度发布 "${release.name}" 立即回滚吗？这将取消灰度发布并恢复到原有版本。`,
+        confirmText: '立即回滚'
+      }
+    });
+    ref.afterClosed().subscribe(r => {
+      if (r) {
+        const request: GrayReleaseActionRequest = {
+          action: 'ROLLBACK',
+          reason: '手动立即回滚'
+        };
+        this.grayReleaseService.performAction(release.appId, release.id, request).subscribe({
+          next: () => {
+            this.snackBar.open('已执行回滚', '关闭', { duration: 3000 });
+            this.loadActiveGrayReleases();
+          },
+          error: (err) => {
+            this.snackBar.open('回滚失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+          }
+        });
+      }
+    });
   }
 }

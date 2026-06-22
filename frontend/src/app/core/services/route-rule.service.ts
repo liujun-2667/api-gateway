@@ -6,47 +6,86 @@ import {
   RouteRule,
   RouteRulePageResponse,
   RouteRuleVersion,
-  RouteRuleApproval
+  RouteRuleApproval,
+  DiffResponse,
+  BatchOperationRequest,
+  BatchOperationResponse
 } from '../../shared/models/route-rule.model';
 
 @Injectable({
   providedIn: 'root'
 })
 export class RouteRuleService extends ApiService<RouteRule> {
-  protected override endpoint = 'route-rules';
+  protected override endpoint = 'rules';
 
   constructor(protected override http: HttpClient) {
     super(http);
   }
 
-  getRouteRules(tenantId?: number, applicationId?: number, page: number = 0, size: number = 10): Observable<RouteRulePageResponse> {
+  private getAppBaseUrl(appId: number): string {
+    return `${this.baseUrl}/apps/${appId}/${this.endpoint}`;
+  }
+
+  getRouteRules(tenantId?: number, appId?: number, page: number = 0, size: number = 10): Observable<RouteRulePageResponse> {
     const params: Record<string, any> = { page, size };
     if (tenantId) params['tenantId'] = tenantId;
-    if (applicationId) params['applicationId'] = applicationId;
+    if (appId) {
+      return this.http.get<RouteRulePageResponse>(this.getAppBaseUrl(appId), { params });
+    }
     return this.getAll(params) as Observable<RouteRulePageResponse>;
   }
 
-  submitForApproval(id: number): Observable<RouteRule> {
-    return this.http.post<RouteRule>(`${this.baseUrl}/${this.endpoint}/${id}/submit`, {});
+  submitForApproval(appId: number, id: number): Observable<RouteRule> {
+    return this.http.post<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}/submit`, {});
   }
 
-  approve(id: number, comment?: string): Observable<RouteRule> {
-    return this.http.post<RouteRule>(`${this.baseUrl}/${this.endpoint}/${id}/approve`, { comment });
+  approve(appId: number, id: number, comment?: string): Observable<RouteRule> {
+    return this.http.post<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}/approve`, { comment });
   }
 
-  reject(id: number, comment?: string): Observable<RouteRule> {
-    return this.http.post<RouteRule>(`${this.baseUrl}/${this.endpoint}/${id}/reject`, { comment });
+  reject(appId: number, id: number, comment?: string): Observable<RouteRule> {
+    return this.http.post<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}/reject`, { comment });
   }
 
-  getVersions(id: number): Observable<RouteRuleVersion[]> {
-    return this.http.get<RouteRuleVersion[]>(`${this.baseUrl}/${this.endpoint}/${id}/versions`);
+  getVersions(appId: number, id: number): Observable<RouteRuleVersion[]> {
+    return this.http.get<RouteRuleVersion[]>(`${this.getAppBaseUrl(appId)}/${id}/versions`);
   }
 
-  rollback(id: number, versionId: number): Observable<RouteRule> {
-    return this.http.post<RouteRule>(`${this.baseUrl}/${this.endpoint}/${id}/rollback/${versionId}`, {});
+  rollback(appId: number, id: number, version: number): Observable<RouteRule> {
+    return this.http.post<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}/rollback`, {}, {
+      params: { version }
+    });
   }
 
-  getApprovals(id: number): Observable<RouteRuleApproval[]> {
-    return this.http.get<RouteRuleApproval[]>(`${this.baseUrl}/${this.endpoint}/${id}/approvals`);
+  rollbackWithReason(appId: number, id: number, version: number, reason: string): Observable<RouteRule> {
+    return this.http.post<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}/rollback-with-reason`, {}, {
+      params: { version, reason }
+    });
+  }
+
+  compareVersions(appId: number, id: number, version1Id: number, version2Id: number): Observable<DiffResponse> {
+    return this.http.post<DiffResponse>(`${this.getAppBaseUrl(appId)}/${id}/versions/compare`, {
+      version1Id, version2Id
+    });
+  }
+
+  batchOperation(appId: number, request: BatchOperationRequest): Observable<BatchOperationResponse> {
+    return this.http.post<BatchOperationResponse>(`${this.getAppBaseUrl(appId)}/batch`, request);
+  }
+
+  getApprovals(appId: number, id: number): Observable<RouteRuleApproval[]> {
+    return this.http.get<RouteRuleApproval[]>(`${this.getAppBaseUrl(appId)}/${id}/approvals`);
+  }
+
+  override create(appId: number, data: Partial<RouteRule>): Observable<RouteRule> {
+    return this.http.post<RouteRule>(this.getAppBaseUrl(appId), data);
+  }
+
+  override update(appId: number, id: number, data: Partial<RouteRule>): Observable<RouteRule> {
+    return this.http.put<RouteRule>(`${this.getAppBaseUrl(appId)}/${id}`, data);
+  }
+
+  override delete(appId: number, id: number): Observable<void> {
+    return this.http.delete<void>(`${this.getAppBaseUrl(appId)}/${id}`);
   }
 }

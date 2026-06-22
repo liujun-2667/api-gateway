@@ -1,5 +1,6 @@
 package com.apigateway.common.dto;
 
+import com.apigateway.common.entity.TargetBackend;
 import com.apigateway.common.enums.HttpMethod;
 import com.apigateway.common.enums.RuleStatus;
 import jakarta.validation.constraints.NotBlank;
@@ -11,6 +12,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 public class RouteRuleDTO {
 
@@ -60,6 +63,26 @@ public class RouteRuleDTO {
         private LocalDateTime effectiveFrom;
 
         private LocalDateTime effectiveTo;
+
+        private List<TargetBackend> targetBackends;
+
+        private Integer connectTimeoutMs;
+
+        private Integer readTimeoutMs;
+
+        private Integer maxRetries;
+
+        private Boolean retryOn5xx;
+
+        private Boolean retryOnTimeout;
+
+        private Integer retryIntervalMs;
+
+        private Map<String, String> requestHeadersToAdd;
+
+        private List<String> requestHeadersToRemove;
+
+        private String pathPrefixReplacement;
     }
 
     @Data
@@ -87,6 +110,16 @@ public class RouteRuleDTO {
         private LocalDateTime effectiveTo;
         private String createdBy;
         private String updatedBy;
+        private List<TargetBackend> targetBackends;
+        private Integer connectTimeoutMs;
+        private Integer readTimeoutMs;
+        private Integer maxRetries;
+        private Boolean retryOn5xx;
+        private Boolean retryOnTimeout;
+        private Integer retryIntervalMs;
+        private Map<String, String> requestHeadersToAdd;
+        private List<String> requestHeadersToRemove;
+        private String pathPrefixReplacement;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }

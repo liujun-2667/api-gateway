@@ -40,7 +40,6 @@ public class TrafficColorRuleDTO {
         @NotNull(message = "Condition type is required")
         private TrafficConditionType conditionType;
 
-        @NotBlank(message = "Condition key is required")
         @Size(max = 128, message = "Condition key must be at most 128 characters")
         private String conditionKey;
 
