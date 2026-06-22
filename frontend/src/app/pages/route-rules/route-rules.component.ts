@@ -557,12 +557,12 @@ export class VersionCompareDialogComponent implements OnInit {
   diffResponse: DiffResponse | null = null;
   appId!: number;
 
-  private categoryMapping: { [key: string]: string[] } = {
-    '目标后端': ['targetBackends', 'targetUrl', 'targetPath'],
-    '超时设置': ['connectTimeoutMs', 'readTimeoutMs'],
-    '重试策略': ['maxRetries', 'retryOn5xx', 'retryOnTimeout', 'retryIntervalMs'],
-    '请求改写': ['requestHeadersToAdd', 'requestHeadersToRemove', 'pathPrefixReplacement', 'stripPrefix'],
-    '其他': ['name', 'description', 'path', 'method', 'matchType', 'priority', 'status']
+  private categoryKeyMapping: { [key: string]: string } = {
+    '目标后端': 'targetBackends',
+    '超时设置': 'timeoutSettings',
+    '重试策略': 'retryStrategy',
+    '请求改写': 'requestRewrite',
+    '其他': 'other'
   };
 
   constructor(
@@ -588,8 +588,14 @@ export class VersionCompareDialogComponent implements OnInit {
 
   getDiffsByCategory(category: string): DiffField[] {
     if (!this.diffResponse?.diffsByCategory) {
-      const fields = this.categoryMapping[category] || [];
-      return (this.diffResponse?.diffs || []).filter(d => fields.includes(d.fieldName));
+      return (this.diffResponse?.diffs || []).filter(d => {
+        const englishKey = this.categoryKeyMapping[category];
+        return englishKey ? this.diffResponse!.diffsByCategory?.[englishKey]?.some(df => df.fieldName === d.fieldName) : false;
+      });
+    }
+    const englishKey = this.categoryKeyMapping[category];
+    if (englishKey && this.diffResponse.diffsByCategory[englishKey]) {
+      return this.diffResponse.diffsByCategory[englishKey];
     }
     return this.diffResponse.diffsByCategory[category] || [];
   }

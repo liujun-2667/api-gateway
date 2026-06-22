@@ -180,7 +180,6 @@ public class GrayReleaseService {
                 .orElseThrow(() -> new NotFoundException("GrayRelease", id.toString()));
 
         Double currentErrorRate = calculateErrorRate(grayRelease);
-        grayRelease.setCurrentErrorRate(currentErrorRate);
 
         TrafficColorRuleDTO.TrafficColorRuleResponse colorRuleResponse = null;
         if (grayRelease.getColorRule() != null) {
@@ -189,8 +188,11 @@ public class GrayReleaseService {
 
         RouteRuleDTO.RouteRuleResponse routeRuleResponse = toRouteRuleResponse(grayRelease.getRouteRule());
 
+        GrayReleaseDTO.GrayReleaseResponse response = toResponse(grayRelease);
+        response.setCurrentErrorRate(currentErrorRate);
+
         return GrayReleaseDTO.GrayReleaseStatusResponse.builder()
-                .grayRelease(toResponse(grayRelease))
+                .grayRelease(response)
                 .colorRule(colorRuleResponse)
                 .routeRule(routeRuleResponse)
                 .build();
@@ -506,6 +508,11 @@ public class GrayReleaseService {
 
     private Double calculateErrorRate(GrayRelease grayRelease) {
         try {
+            Long routeRuleId = grayRelease.getRouteRule() != null ? grayRelease.getRouteRule().getId() : null;
+            if (routeRuleId != null) {
+                return metricsService.getRouteErrorRate(routeRuleId, grayRelease.getObservationMinutesPerStage());
+            }
+
             Long tenantId = grayRelease.getTenant() != null ? grayRelease.getTenant().getId() : null;
             String appId = grayRelease.getApplication() != null ? grayRelease.getApplication().getAppId() : null;
 
@@ -519,15 +526,15 @@ public class GrayReleaseService {
             }
 
             long totalRequests = 0;
-            long errorRequests = 0;
+            long serverErrorRequests = 0;
 
             for (Map.Entry<String, Long> entry : statusDistribution.entrySet()) {
                 String statusCode = entry.getKey();
                 Long count = entry.getValue() != null ? entry.getValue() : 0L;
                 totalRequests += count;
 
-                if (statusCode.startsWith("4") || statusCode.startsWith("5")) {
-                    errorRequests += count;
+                if (statusCode.startsWith("5")) {
+                    serverErrorRequests += count;
                 }
             }
 
@@ -535,7 +542,7 @@ public class GrayReleaseService {
                 return 0.0;
             }
 
-            return (errorRequests * 100.0) / totalRequests;
+            return (serverErrorRequests * 100.0) / totalRequests;
         } catch (Exception e) {
             log.warn("Failed to calculate error rate for gray release {}", grayRelease.getId(), e);
             return 0.0;
