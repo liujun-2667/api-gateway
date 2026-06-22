@@ -62,7 +62,7 @@ public class ApiDocService {
             throw new NotFoundException("Application", applicationId.toString());
         }
         return apiDocRepository.findByApplicationIdOrderByCreatedAtDesc(applicationId).stream()
-                .map(this::toDocResponse)
+                .map(this::toDocResponseWithGroups)
                 .collect(Collectors.toList());
     }
 
@@ -71,6 +71,12 @@ public class ApiDocService {
         ApiDoc apiDoc = apiDocRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("ApiDoc", id.toString()));
         return toDocResponseWithGroups(apiDoc);
+    }
+
+    @Transactional(readOnly = true)
+    public ApiEndpoint getEndpointEntityById(Long id) {
+        return apiEndpointRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("ApiEndpoint", id.toString()));
     }
 
     @Auditable(resourceType = "ApiDoc", operationType = OperationType.API_DOC_UPDATE)
@@ -261,23 +267,30 @@ public class ApiDocService {
             Map<String, Object> paths = (Map<String, Object>) openApiDoc.get("paths");
             if (paths != null) {
                 Map<String, ApiDocGroup> tagGroups = new LinkedHashMap<>();
-                Map<String, Object> tags = (Map<String, Object>) openApiDoc.get("tags");
+                Object tagsObj = openApiDoc.get("tags");
 
                 int groupSortOrder = 0;
-                if (tags != null) {
-                    for (Map.Entry<String, Object> tagEntry : tags.entrySet()) {
-                        Map<String, Object> tagInfo = (Map<String, Object>) tagEntry.getValue();
-                        String tagName = tagInfo.get("name") != null ? tagInfo.get("name").toString() : tagEntry.getKey();
-                        String tagDesc = tagInfo.get("description") != null ? tagInfo.get("description").toString() : "";
+                if (tagsObj instanceof List) {
+                    List<?> tagsRawList = (List<?>) tagsObj;
+                    for (Object tagItem : tagsRawList) {
+                        if (tagItem instanceof Map) {
+                            Map<?, ?> tagRawInfo = (Map<?, ?>) tagItem;
+                            Map<String, Object> tagInfo = new LinkedHashMap<>();
+                            for (Map.Entry<?, ?> entry : tagRawInfo.entrySet()) {
+                                tagInfo.put(entry.getKey().toString(), entry.getValue());
+                            }
+                            String tagName = tagInfo.get("name") != null ? tagInfo.get("name").toString() : "分组" + groupSortOrder;
+                            String tagDesc = tagInfo.get("description") != null ? tagInfo.get("description").toString() : "";
 
-                        ApiDocGroup group = ApiDocGroup.builder()
-                                .name(tagName)
-                                .description(tagDesc)
-                                .sortOrder(groupSortOrder++)
-                                .apiDoc(apiDoc)
-                                .build();
-                        group = apiDocGroupRepository.save(group);
-                        tagGroups.put(tagName, group);
+                            ApiDocGroup group = ApiDocGroup.builder()
+                                    .name(tagName)
+                                    .description(tagDesc)
+                                    .sortOrder(groupSortOrder++)
+                                    .apiDoc(apiDoc)
+                                    .build();
+                            group = apiDocGroupRepository.save(group);
+                            tagGroups.put(tagName, group);
+                        }
                     }
                 }
 
@@ -309,8 +322,14 @@ public class ApiDocService {
                         String epName = operation.get("summary") != null ? operation.get("summary").toString() : methodStr + " " + pathStr;
                         String epDesc = operation.get("description") != null ? operation.get("description").toString() : "";
 
-                        List<String> epTags = (List<String>) operation.get("tags");
-                        String targetTag = (epTags != null && !epTags.isEmpty()) ? epTags.get(0) : "default";
+                        Object tagsObj2 = operation.get("tags");
+                        String targetTag = "default";
+                        if (tagsObj2 instanceof List) {
+                            List<?> epTagsList = (List<?>) tagsObj2;
+                            if (!epTagsList.isEmpty() && epTagsList.get(0) instanceof String) {
+                                targetTag = epTagsList.get(0).toString();
+                            }
+                        }
 
                         ApiDocGroup targetGroup = tagGroups.get(targetTag);
                         if (targetGroup == null) {

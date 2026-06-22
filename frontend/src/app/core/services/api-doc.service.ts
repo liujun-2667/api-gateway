@@ -113,4 +113,12 @@ export class ApiDocService extends ApiService<ApiDoc> {
   batchReplay(caseIds: number[]): Observable<BatchReplayResult[]> {
     return this.http.post<BatchReplayResult[]>(`${this.baseUrl}/api-docs/debug-cases/batch-replay`, { caseIds });
   }
+
+  sendDebugRequest(request: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/api-docs/debug`, request);
+  }
+
+  getApiDocDetail(id: number): Observable<ApiDoc> {
+    return this.http.get<ApiDoc>(`${this.baseUrl}/api-docs/${id}`);
+  }
 }

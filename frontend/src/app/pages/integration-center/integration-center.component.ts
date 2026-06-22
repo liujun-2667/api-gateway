@@ -3,18 +3,33 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, FormControl } from '@angular/forms';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatTreeNestedDataSource } from '@angular/material/tree';
+import { NestedTreeControl } from '@angular/cdk/tree';
 import { MaterialModule } from '../../shared/material.module';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { ApiDocService } from '../../core/services/api-doc.service';
 import { ApplicationService } from '../../core/services/application.service';
-import { RouteRuleService } from '../../core/services/route-rule.service';
 import { Application } from '../../shared/models/application.model';
 import {
   ApiDoc, ApiDocGroup, ApiEndpoint, MockConfig,
-  DebugCase, ApiChangeRecord, ChangeNotification, BatchReplayResult
+  DebugCase, ApiChangeRecord, ChangeNotification, BatchReplayResult, DebugResponse
 } from '../../shared/models/api-doc.model';
-import { Subscription } from 'rxjs';
-import { webSocket } from 'rxjs/webSocket';
+import { Subscription, forkJoin } from 'rxjs';
+import { Client, Stomp } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+
+interface TreeNode {
+  id: number;
+  name: string;
+  isGroup?: boolean;
+  children?: TreeNode[];
+  expanded?: boolean;
+  endpoint?: ApiEndpoint;
+  method?: string;
+  path?: string;
+  hasMock?: boolean;
+  groupId?: number;
+}
 
 @Component({
   selector: 'app-create-doc-dialog',
@@ -190,39 +205,34 @@ export class ImportDialogComponent {
           <mat-card-title>接口列表</mat-card-title>
           <mat-card-content>
             <mat-tree [dataSource]="treeDataSource" [treeControl]="treeControl" class="api-tree">
-              <mat-tree-node *matTreeNodeDef="let node" class="tree-node endpoint-node"
-                  [class.selected]="selectedEndpoint?.id === node.id"
-                  (click)="selectEndpoint(node)">
-                <mat-icon class="tree-icon" [ngClass]="getMethodClass(node.method)">{{ getMethodIcon(node.method) }}</mat-icon>
-                <span class="node-label">{{ node.name }}</span>
-                <span class="node-path">{{ node.path }}</span>
-                <mat-chip *ngIf="node.mockConfig?.enabled" class="mock-chip" color="accent" selected>Mock</mat-chip>
-              </mat-tree-node>
-              <mat-nested-tree-node *matNestedTreeNodeDef="let node; let children = children">
+              <mat-nested-tree-node *matTreeNodeDef="let node; when: hasChild">
                 <div class="tree-node group-node" (click)="toggleGroup(node)">
-                  <mat-icon class="tree-icon">folder</mat-icon>
+                  <mat-icon matTreeNodeToggle class="tree-icon">{{ node.expanded ? 'folder_open' : 'folder' }}</mat-icon>
                   <span class="node-label">{{ node.name }}</span>
-                  <span class="node-count">({{ node.endpoints?.length || 0 }})</span>
+                  <span class="node-count">({{ node.children?.length || 0 }})</span>
                   <button mat-icon-button (click)="openCreateEndpointDialog(node); $event.stopPropagation()" matTooltip="添加接口">
                     <mat-icon>add</mat-icon>
                   </button>
                 </div>
                 <div [class.tree-invisible]="!node.expanded">
-                  <ng-container *ngIf="children">
-                    <ng-container *matTreeNodeOutlet="let child; children: children">
-                      <div [class.selected]="selectedEndpoint?.id === child.id"
-                           class="tree-node endpoint-node"
-                           (click)="selectEndpoint(child)">
-                        <mat-icon class="tree-icon" [ngClass]="getMethodClass(child.method)">{{ getMethodIcon(child.method) }}</mat-icon>
-                        <span class="node-label">{{ child.name }}</span>
-                        <span class="node-path">{{ child.path }}</span>
-                        <mat-chip *ngIf="child.mockConfig?.enabled" class="mock-chip" color="accent" selected>Mock</mat-chip>
-                      </div>
-                    </ng-container>
-                  </ng-container>
+                  <ng-container matTreeNodeOutlet></ng-container>
+                </div>
+              </mat-nested-tree-node>
+              <mat-nested-tree-node *matTreeNodeDef="let node">
+                <div class="tree-node endpoint-node"
+                    [class.selected]="selectedEndpoint?.id === node.endpoint?.id"
+                    (click)="selectEndpoint(node)">
+                  <mat-icon class="tree-icon" [ngClass]="getMethodClass(node.method)">{{ getMethodIcon(node.method) }}</mat-icon>
+                  <span class="node-label">{{ node.name }}</span>
+                  <span class="node-path">{{ node.path }}</span>
+                  <mat-chip *ngIf="node.hasMock" class="mock-chip" color="accent" selected>Mock</mat-chip>
                 </div>
               </mat-nested-tree-node>
             </mat-tree>
+            <div *ngIf="treeDataSource.data.length === 0" class="no-data">
+              <mat-icon>folder_open</mat-icon>
+              <span>暂无文档数据，请先创建或导入</span>
+            </div>
           </mat-card-content>
         </mat-card>
       </div>
@@ -323,8 +333,8 @@ export class ImportDialogComponent {
                         </mat-select>
                       </mat-form-field>
                     </div>
-                    <button mat-raised-button color="primary" (click)="saveMockConfig()" [disabled]="mockForm.invalid">
-                      <mat-icon>save</mat-icon>保存Mock配置
+                    <button mat-raised-button color="primary" (click)="saveMockConfig()" [disabled]="mockForm.invalid || mockSaving">
+                      <mat-icon>save</mat-icon>{{ mockSaving ? '保存中...' : '保存Mock配置' }}
                     </button>
                   </form>
                 </mat-card-content>
@@ -350,8 +360,8 @@ export class ImportDialogComponent {
                       <textarea matInput [(ngModel)]="debugRequestBody" rows="6" placeholder='{"key": "value"}'></textarea>
                     </mat-form-field>
                     <div class="debug-actions">
-                      <button mat-raised-button color="primary" (click)="sendDebugRequest()">
-                        <mat-icon>send</mat-icon>发送请求
+                      <button mat-raised-button color="primary" (click)="sendDebugRequest()" [disabled]="debugSending">
+                        <mat-icon>send</mat-icon>{{ debugSending ? '发送中...' : '发送请求' }}
                       </button>
                       <button mat-raised-button color="accent" (click)="saveAsDebugCase()">
                         <mat-icon>save</mat-icon>保存为用例
@@ -364,13 +374,13 @@ export class ImportDialogComponent {
                       <mat-chip *ngIf="debugResponse.isMock" class="mock-chip" color="accent" selected>Mock</mat-chip>
                     </h4>
                     <div class="response-meta">
-                      <span>状态码: <strong>{{ debugResponse.statusCode }}</strong></span>
+                      <span>状态码: <strong [class.error-status]="debugResponse.statusCode >= 400">{{ debugResponse.statusCode }}</strong></span>
                       <span>延迟: <strong>{{ debugResponse.latencyMs }}ms</strong></span>
                     </div>
                     <pre class="response-json">{{ formatJson(debugResponse.responseBody) }}</pre>
                   </div>
 
-                  <div *ngIf="debugCases.length" class="debug-cases">
+                  <div *ngIf="debugCases.length > 0" class="debug-cases">
                     <h4>调试用例</h4>
                     <table mat-table [dataSource]="debugCases" class="full-width">
                       <ng-container matColumnDef="select">
@@ -403,8 +413,8 @@ export class ImportDialogComponent {
                       <tr mat-header-row *matHeaderRowDef="['select','name','useMock','actions']"></tr>
                       <tr mat-row *matRowDef="let row; columns: ['select','name','useMock','actions'];"></tr>
                     </table>
-                    <button mat-raised-button color="primary" [disabled]="selectedCases.size === 0" (click)="batchReplay()" style="margin-top: 12px;">
-                      <mat-icon>replay</mat-icon>批量回放 ({{ selectedCases.size }})
+                    <button mat-raised-button color="primary" [disabled]="selectedCases.size === 0 || replaying" (click)="batchReplay()" style="margin-top: 12px;">
+                      <mat-icon>replay</mat-icon>{{ replaying ? '回放中...' : '批量回放 (' + selectedCases.size + ')' }}
                     </button>
                   </div>
                 </mat-card-content>
@@ -426,6 +436,14 @@ export class ImportDialogComponent {
                       <mat-icon matListItemIcon color="primary">history</mat-icon>
                       <span matListItemTitle>{{ record.changeSummary }}</span>
                       <span matListItemLine>{{ record.changedBy || '系统' }} · {{ record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+                      <div matListItemLine *ngIf="record.changeDetails?.length" class="change-details">
+                        <div *ngFor="let d of record.changeDetails" class="change-detail-item">
+                          <span class="field">{{ d.field }}</span>
+                          <span class="type-badge" [class]="d.changeType === 'ADD' ? 'add' : d.changeType === 'REMOVE' ? 'remove' : 'modify'">
+                            {{ d.changeType }}
+                          </span>
+                        </div>
+                      </div>
                     </mat-list-item>
                   </mat-list>
                 </mat-card-content>
@@ -454,17 +472,18 @@ export class ImportDialogComponent {
     }
     .change-banner span { flex: 1; font-size: 14px; }
     .integration-layout { display: flex; gap: 24px; }
-    .left-panel { width: 320px; min-width: 280px; }
+    .left-panel { width: 380px; min-width: 320px; }
     .right-panel { flex: 1; min-width: 0; }
     .right-panel.empty-state { display: flex; align-items: flex-start; }
     .api-tree { overflow: auto; max-height: calc(100vh - 260px); }
-    .tree-node { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 4px; }
+    .tree-node { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
     .tree-node:hover { background: #f5f5f5; }
     .tree-node.selected { background: #e3f2fd; }
-    .tree-node.endpoint-node { padding-left: 24px; }
-    .tree-icon { font-size: 18px; width: 18px; height: 18px; }
+    .tree-node.endpoint-node { padding-left: 40px; }
+    .tree-node.group-node { padding-left: 8px; }
+    .tree-icon { font-size: 20px; width: 20px; height: 20px; }
     .node-label { font-size: 13px; font-weight: 500; }
-    .node-path { font-size: 11px; color: #666; margin-left: auto; }
+    .node-path { font-size: 11px; color: #666; margin-left: auto; margin-right: 8px; }
     .node-count { font-size: 11px; color: #999; }
     .mock-chip { font-size: 10px !important; height: 20px !important; line-height: 20px !important; }
     .tree-invisible { display: none; }
@@ -487,6 +506,7 @@ export class ImportDialogComponent {
     .debug-result { background: #fafafa; padding: 16px; border-radius: 4px; margin-top: 16px; }
     .debug-result h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px 0; }
     .response-meta { display: flex; gap: 16px; margin-bottom: 12px; font-size: 13px; }
+    .error-status { color: #f44336 !important; }
     .response-json { background: #263238; color: #aed581; padding: 16px; border-radius: 4px; font-size: 12px; overflow-x: auto; max-height: 400px; }
     .debug-cases { margin-top: 24px; border-top: 1px solid #e0e0e0; padding-top: 16px; }
     .debug-cases h4 { margin: 0 0 12px 0; }
@@ -498,13 +518,19 @@ export class ImportDialogComponent {
     .method-put { color: #ff9800 !important; background: #fff3e0 !important; }
     .method-delete { color: #f44336 !important; background: #ffebee !important; }
     .method-patch { color: #9c27b0 !important; background: #f3e5f5 !important; }
+    .change-details { margin-top: 4px; }
+    .change-detail-item { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; font-size: 12px; }
+    .change-detail-item .field { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+    .type-badge { padding: 1px 4px; border-radius: 2px; font-size: 10px; font-weight: 500; }
+    .type-badge.add { background: #e8f5e9; color: #4caf50; }
+    .type-badge.remove { background: #ffebee; color: #f44336; }
+    .type-badge.modify { background: #fff3e0; color: #ff9800; }
   `]
 })
 export class IntegrationCenterComponent implements OnInit, OnDestroy {
   applications: Application[] = [];
   selectedAppId: number | null = null;
   apiDocs: ApiDoc[] = [];
-  treeDataSource: any[] = [];
   selectedEndpoint: ApiEndpoint | null = null;
   rightTabIndex = 0;
   changeNotification: ChangeNotification | null = null;
@@ -512,18 +538,26 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   mockForm: FormGroup;
   debugUseMock = true;
   debugRequestBody = '';
-  debugResponse: any = null;
+  debugResponse: DebugResponse | null = null;
   debugCases: DebugCase[] = [];
   selectedCases = new Set<number>();
   changeRecords: ApiChangeRecord[] = [];
 
+  mockSaving = false;
+  debugSending = false;
+  replaying = false;
+
+  treeControl = new NestedTreeControl<TreeNode>(node => node.children || []);
+  treeDataSource = new MatTreeNestedDataSource<TreeNode>();
+  hasChild = (_: number, node: TreeNode) => !!node.children && node.children.length > 0;
+
   expandedGroups = new Set<number>();
-  private wsSubscription: Subscription | null = null;
+  private stompClient: Client | null = null;
+  private subscriptions: Subscription[] = [];
 
   constructor(
     private apiDocService: ApiDocService,
     private applicationService: ApplicationService,
-    private routeRuleService: RouteRuleService,
     private dialog: MatDialog,
     private snackBar: MatSnackBar,
     private fb: FormBuilder
@@ -537,67 +571,123 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.applicationService.getAllApplications().subscribe({
+    const sub = this.applicationService.getAllApplications().subscribe({
       next: (apps: Application[]) => {
         this.applications = apps;
         if (apps.length > 0) {
           this.selectedAppId = apps[0].id;
           this.loadApiDocs();
         }
+      },
+      error: (err) => {
+        console.error('Failed to load applications:', err);
+        this.snackBar.open('加载应用列表失败', '关闭', { duration: 3000 });
       }
     });
+    this.subscriptions.push(sub);
   }
 
   ngOnDestroy(): void {
-    this.wsSubscription?.unsubscribe();
+    this.subscriptions.forEach(s => s.unsubscribe());
+    this.disconnectWebSocket();
   }
 
   onAppChange(appId: number): void {
     this.selectedAppId = appId;
     this.selectedEndpoint = null;
+    this.apiDocs = [];
+    this.treeDataSource.data = [];
+    this.disconnectWebSocket();
     this.loadApiDocs();
   }
 
   loadApiDocs(): void {
     if (!this.selectedAppId) return;
-    this.apiDocService.getApiDocsByAppId(this.selectedAppId).subscribe({
+    const sub = this.apiDocService.getApiDocsByAppId(this.selectedAppId).subscribe({
       next: (docs: ApiDoc[]) => {
         this.apiDocs = docs;
-        this.buildTree();
+        if (docs.length === 0) {
+          this.treeDataSource.data = [];
+          return;
+        }
+        const detailRequests = docs.map(doc => this.apiDocService.getApiDocDetail(doc.id));
+        forkJoin(detailRequests).subscribe({
+          next: (docsWithDetails: ApiDoc[]) => {
+            this.apiDocs = docsWithDetails;
+            this.buildTree();
+          },
+          error: (err) => {
+            console.error('Failed to load doc details:', err);
+            this.treeDataSource.data = [];
+          }
+        });
+      },
+      error: (err) => {
+        console.error('Failed to load API docs:', err);
+        this.snackBar.open('加载文档列表失败', '关闭', { duration: 3000 });
+        this.treeDataSource.data = [];
       }
     });
+    this.subscriptions.push(sub);
   }
 
   buildTree(): void {
-    this.treeDataSource = [];
+    const treeData: TreeNode[] = [];
     for (const doc of this.apiDocs) {
       if (doc.groups) {
         for (const group of doc.groups) {
-          const treeNode = {
-            ...group,
+          const groupNode: TreeNode = {
+            id: group.id,
+            name: group.name,
+            isGroup: true,
             expanded: this.expandedGroups.has(group.id),
-            isGroup: true
+            groupId: group.id,
+            children: []
           };
-          this.treeDataSource.push(treeNode);
+          if (group.endpoints) {
+            for (const ep of group.endpoints) {
+              const epNode: TreeNode = {
+                id: ep.id,
+                name: ep.name,
+                method: ep.method,
+                path: ep.path,
+                hasMock: !!ep.mockConfig?.enabled,
+                endpoint: ep,
+                groupId: group.id
+              };
+              groupNode.children?.push(epNode);
+            }
+          }
+          treeData.push(groupNode);
         }
+      }
+    }
+    this.treeDataSource.data = treeData;
+    for (const node of treeData) {
+      if (node.expanded) {
+        this.treeControl.expand(node);
       }
     }
   }
 
-  toggleGroup(node: any): void {
+  toggleGroup(node: TreeNode): void {
     node.expanded = !node.expanded;
     if (node.expanded) {
       this.expandedGroups.add(node.id);
+      this.treeControl.expand(node);
     } else {
       this.expandedGroups.delete(node.id);
+      this.treeControl.collapse(node);
     }
   }
 
-  selectEndpoint(endpoint: ApiEndpoint): void {
-    this.selectedEndpoint = endpoint;
+  selectEndpoint(node: TreeNode): void {
+    if (!node.endpoint) return;
+    this.selectedEndpoint = node.endpoint;
     this.rightTabIndex = 0;
-    this.loadEndpointDetails(endpoint.id);
-    this.connectWebSocket(endpoint);
+    this.debugResponse = null;
+    this.loadEndpointDetails(node.endpoint.id);
+    this.connectWebSocket(node.endpoint);
   }
 
   loadEndpointDetails(endpointId: number): void {
@@ -628,31 +718,87 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   }
 
   connectWebSocket(endpoint: ApiEndpoint): void {
-    this.wsSubscription?.unsubscribe();
+    this.disconnectWebSocket();
     try {
-      const wsUrl = `ws://${window.location.host}/ws/api-docs`;
-      const subject = webSocket(wsUrl);
-      this.wsSubscription = subject.subscribe({
-        next: (msg: any) => {
-          if (msg.endpointId === endpoint.id) {
-            this.changeNotification = msg;
-          }
-        },
-        error: () => {}
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/api-docs`;
+      const socket = new SockJS(wsUrl);
+      this.stompClient = new Client({
+        webSocketFactory: () => socket,
+        reconnectDelay: 5000,
+        debug: (str) => {}
       });
-    } catch (e) {}
+
+      this.stompClient.onConnect = (frame) => {
+        const docId = this.getDocIdForEndpoint(endpoint.id);
+        if (docId) {
+          this.stompClient?.subscribe(`/topic/api-docs/${docId}`, (message) => {
+            try {
+              const notification: ChangeNotification = JSON.parse(message.body);
+              if (notification.endpointId === endpoint.id) {
+                this.changeNotification = notification;
+              }
+            } catch (e) {
+              console.error('Failed to parse WebSocket message:', e);
+            }
+          });
+          this.stompClient?.subscribe('/topic/api-docs/changes', (message) => {
+            try {
+              const notification: ChangeNotification = JSON.parse(message.body);
+              if (notification.endpointId === endpoint.id) {
+                this.changeNotification = notification;
+              }
+            } catch (e) {
+              console.error('Failed to parse WebSocket message:', e);
+            }
+          });
+        }
+      };
+
+      this.stompClient.onStompError = (frame) => {
+        console.error('WebSocket STOMP error:', frame);
+      };
+
+      this.stompClient.activate();
+    } catch (e) {
+      console.error('Failed to connect WebSocket:', e);
+    }
+  }
+
+  disconnectWebSocket(): void {
+    if (this.stompClient) {
+      this.stompClient.deactivate();
+      this.stompClient = null;
+    }
+  }
+
+  getDocIdForEndpoint(endpointId: number): number | null {
+    for (const doc of this.apiDocs) {
+      if (doc.groups) {
+        for (const group of doc.groups) {
+          if (group.endpoints?.some(e => e.id === endpointId)) {
+            return doc.id;
+          }
+        }
+      }
+    }
+    return null;
   }
 
   saveMockConfig(): void {
     if (!this.selectedEndpoint || this.mockForm.invalid) return;
+    this.mockSaving = true;
     this.apiDocService.updateMockConfig(this.selectedEndpoint.id, this.mockForm.value).subscribe({
       next: (config: MockConfig) => {
         if (this.selectedEndpoint) {
           this.selectedEndpoint.mockConfig = config;
         }
+        this.mockSaving = false;
+        this.buildTree();
         this.snackBar.open('Mock配置已保存', '关闭', { duration: 3000 });
       },
       error: (err: any) => {
+        this.mockSaving = false;
         this.snackBar.open('保存失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
       }
     });
@@ -660,19 +806,50 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
 
   sendDebugRequest(): void {
     if (!this.selectedEndpoint) return;
-    this.debugResponse = {
-      statusCode: 200,
-      responseBody: { message: 'Debug request simulated', mock: this.debugUseMock },
-      latencyMs: this.debugUseMock ? (this.mockForm.value.delayMs || 0) : 45,
-      isMock: this.debugUseMock
+    this.debugSending = true;
+    this.debugResponse = null;
+
+    let requestBody = null;
+    if (this.debugRequestBody?.trim()) {
+      try {
+        requestBody = JSON.parse(this.debugRequestBody);
+      } catch (e) {
+        requestBody = this.debugRequestBody;
+      }
+    }
+
+    const request = {
+      endpointId: this.selectedEndpoint.id,
+      useMock: this.debugUseMock,
+      requestBody: requestBody,
+      requestParams: {},
+      requestHeaders: {}
     };
+
+    this.apiDocService.sendDebugRequest(request).subscribe({
+      next: (resp: DebugResponse) => {
+        this.debugResponse = resp;
+        this.debugSending = false;
+      },
+      error: (err: any) => {
+        this.debugSending = false;
+        this.debugResponse = {
+          statusCode: err.status || 500,
+          responseBody: { error: '请求失败', message: err.error?.message || err.message },
+          latencyMs: 0,
+          isMock: this.debugUseMock
+        };
+        this.snackBar.open('请求失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+      }
+    });
   }
 
   saveAsDebugCase(): void {
     if (!this.selectedEndpoint) return;
     const name = `用例 ${this.debugCases.length + 1}`;
     let requestBody = null;
-    try { requestBody = JSON.parse(this.debugRequestBody); } catch (e) { requestBody = this.debugRequestBody; }
+    try { requestBody = this.debugRequestBody ? JSON.parse(this.debugRequestBody) : null; }
+    catch (e) { requestBody = this.debugRequestBody; }
 
     this.apiDocService.createDebugCase(this.selectedEndpoint.id, {
       name,
@@ -683,7 +860,7 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
     }).subscribe({
       next: () => {
         this.snackBar.open('调试用例已保存', '关闭', { duration: 3000 });
-        this.loadEndpointDetails(this.selectedEndpoint!.id);
+        if (this.selectedEndpoint) this.loadEndpointDetails(this.selectedEndpoint.id);
       },
       error: (err: any) => {
         this.snackBar.open('保存失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
@@ -701,12 +878,16 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
       next: () => {
         this.snackBar.open('用例已删除', '关闭', { duration: 3000 });
         if (this.selectedEndpoint) this.loadEndpointDetails(this.selectedEndpoint.id);
+      },
+      error: (err) => {
+        this.snackBar.open('删除失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
       }
     });
   }
 
   toggleCase(id: number, checked: boolean): void {
-    if (checked) { this.selectedCases.add(id); } else { this.selectedCases.delete(id); }
+    if (checked) { this.selectedCases.add(id); }
+    else { this.selectedCases.delete(id); }
   }
 
   toggleAllCases(checked: boolean): void {
@@ -719,12 +900,16 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   }
 
   batchReplay(): void {
+    if (this.selectedCases.size === 0) return;
+    this.replaying = true;
     this.apiDocService.batchReplay(Array.from(this.selectedCases)).subscribe({
       next: (results: BatchReplayResult[]) => {
+        this.replaying = false;
         const failed = results.filter(r => !r.success).length;
         this.snackBar.open(`回放完成: ${results.length - failed}成功, ${failed}失败`, '关闭', { duration: 5000 });
       },
       error: (err: any) => {
+        this.replaying = false;
         this.snackBar.open('回放失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
       }
     });
@@ -748,7 +933,7 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   }
 
   openImportDialog(): void {
-    const ref = this.dialog.open(ImportDialogComponent, { width: '600px' });
+    const ref = this.dialog.open(ImportDialogComponent, { width: '700px' });
     ref.afterClosed().subscribe((content: string) => {
       if (content && this.selectedAppId) {
         this.apiDocService.importOpenApi(this.selectedAppId, content).subscribe({
@@ -764,11 +949,12 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
     });
   }
 
-  openCreateEndpointDialog(groupNode: any): void {
-    const ref = this.dialog.open(CreateEndpointDialogComponent, { data: { groupId: groupNode.id }, width: '550px' });
+  openCreateEndpointDialog(groupNode: TreeNode): void {
+    if (!groupNode.groupId) return;
+    const ref = this.dialog.open(CreateEndpointDialogComponent, { data: { groupId: groupNode.groupId }, width: '550px' });
     ref.afterClosed().subscribe((result: any) => {
       if (result) {
-        this.apiDocService.createEndpoint(groupNode.id, result).subscribe({
+        this.apiDocService.createEndpoint(groupNode.groupId, result).subscribe({
           next: () => {
             this.snackBar.open('接口创建成功', '关闭', { duration: 3000 });
             this.loadApiDocs();
@@ -787,6 +973,19 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
       this.apiDocService.getChangeHistory(this.selectedEndpoint.id).subscribe({
         next: (records: ApiChangeRecord[]) => { this.changeRecords = records; }
       });
+      for (const doc of this.apiDocs) {
+        if (doc.groups?.some(g => g.endpoints?.some(e => e.id === this.selectedEndpoint?.id))) {
+          const sub = this.apiDocService.getApiDocDetail(doc.id).subscribe({
+            next: (updatedDoc: ApiDoc) => {
+              const idx = this.apiDocs.findIndex(d => d.id === doc.id);
+              if (idx >= 0) this.apiDocs[idx] = updatedDoc;
+              this.buildTree();
+            }
+          });
+          this.subscriptions.push(sub);
+          break;
+        }
+      }
     }
     this.changeNotification = null;
   }
@@ -795,11 +994,11 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
     this.changeNotification = null;
   }
 
-  getMethodClass(method: string): string {
+  getMethodClass(method?: string): string {
     return 'method-' + (method || 'get').toLowerCase();
   }
 
-  getMethodIcon(method: string): string {
+  getMethodIcon(method?: string): string {
     switch ((method || '').toUpperCase()) {
       case 'GET': return 'arrow_downward';
       case 'POST': return 'arrow_upward';

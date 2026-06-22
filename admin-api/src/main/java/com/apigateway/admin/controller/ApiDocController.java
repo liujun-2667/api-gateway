@@ -5,14 +5,19 @@ import com.apigateway.admin.service.DebugCaseService;
 import com.apigateway.admin.service.MockService;
 import com.apigateway.admin.util.SecurityUtil;
 import com.apigateway.common.dto.ApiDocDTO;
+import com.apigateway.common.entity.ApiEndpoint;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.*;
 
+@Slf4j
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
@@ -169,5 +174,118 @@ public class ApiDocController {
     public ResponseEntity<List<ApiDocDTO.BatchReplayResult>> batchReplay(
             @Valid @RequestBody ApiDocDTO.BatchReplayRequest request) {
         return ResponseEntity.ok(debugCaseService.batchReplay(request));
+    }
+
+    private final RestTemplate restTemplate = new RestTemplate();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @PostMapping("/api-docs/debug")
+    public ResponseEntity<ApiDocDTO.DebugResponse> sendDebugRequest(@Valid @RequestBody ApiDocDTO.DebugRequest request) {
+        long startTime = System.currentTimeMillis();
+        boolean useMock = Boolean.TRUE.equals(request.getUseMock());
+
+        ApiEndpoint endpoint = apiDocService.getEndpointEntityById(request.getEndpointId());
+
+        if (useMock) {
+            if (endpoint.getMockConfig() != null) {
+                mockService.updateMockConfig(request.getEndpointId(),
+                        ApiDocDTO.MockConfigUpdateRequest.builder()
+                                .enabled(true)
+                                .delayMs(endpoint.getMockConfig().getDelayMs())
+                                .faultInjectionPercent(endpoint.getMockConfig().getFaultInjectionPercent())
+                                .faultErrorCode(endpoint.getMockConfig().getFaultErrorCode())
+                                .build(),
+                        "debug-user");
+            }
+
+            try {
+                int delay = 0;
+                if (endpoint.getMockConfig() != null) {
+                    delay = endpoint.getMockConfig().getDelayMs();
+                }
+                if (delay > 0) {
+                    Thread.sleep(delay);
+                }
+
+                Object mockBody = mockService.generateMockResponse(endpoint);
+                boolean shouldFault = endpoint.getMockConfig() != null && mockService.shouldInjectFault(endpoint.getMockConfig());
+                int statusCode = shouldFault ? Integer.parseInt(endpoint.getMockConfig().getFaultErrorCode()) : 200;
+
+                Map<String, String> headers = new LinkedHashMap<>();
+                headers.put("Content-Type", "application/json");
+                headers.put("X-Mock-Response", "true");
+
+                long latency = System.currentTimeMillis() - startTime;
+                return ResponseEntity.ok(ApiDocDTO.DebugResponse.builder()
+                        .statusCode(statusCode)
+                        .responseHeaders(headers)
+                        .responseBody(mockBody)
+                        .latencyMs(latency)
+                        .isMock(true)
+                        .build());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        } else {
+            try {
+                String baseUrl = "http://localhost:8080";
+                String url = baseUrl + endpoint.getPath();
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                if (request.getRequestHeaders() != null) {
+                    for (Map.Entry<String, Object> entry : request.getRequestHeaders().entrySet()) {
+                        headers.set(entry.getKey(), entry.getValue() != null ? entry.getValue().toString() : "");
+                    }
+                }
+
+                Object bodyObj = request.getRequestBody();
+                String body = null;
+                if (bodyObj != null) {
+                    body = objectMapper.writeValueAsString(bodyObj);
+                }
+
+                HttpEntity<String> entity = new HttpEntity<>(body, headers);
+
+                ResponseEntity<Object> response = restTemplate.exchange(
+                        url,
+                        org.springframework.http.HttpMethod.valueOf(endpoint.getMethod().name()),
+                        entity,
+                        Object.class);
+
+                long latency = System.currentTimeMillis() - startTime;
+
+                Map<String, String> respHeaders = new LinkedHashMap<>();
+                if (response.getHeaders() != null) {
+                    for (Map.Entry<String, List<String>> entry : response.getHeaders().entrySet()) {
+                        respHeaders.put(entry.getKey(), String.join(",", entry.getValue()));
+                    }
+                }
+
+                return ResponseEntity.ok(ApiDocDTO.DebugResponse.builder()
+                        .statusCode(response.getStatusCode().value())
+                        .responseHeaders(respHeaders)
+                        .responseBody(response.getBody())
+                        .latencyMs(latency)
+                        .isMock(false)
+                        .build());
+            } catch (Exception e) {
+                log.error("Debug request failed", e);
+                long latency = System.currentTimeMillis() - startTime;
+                Map<String, String> respHeaders = new LinkedHashMap<>();
+                respHeaders.put("Content-Type", "application/json");
+                Map<String, Object> errorBody = new LinkedHashMap<>();
+                errorBody.put("error", "Debug request failed");
+                errorBody.put("message", e.getMessage());
+                return ResponseEntity.ok(ApiDocDTO.DebugResponse.builder()
+                        .statusCode(500)
+                        .responseHeaders(respHeaders)
+                        .responseBody(errorBody)
+                        .latencyMs(latency)
+                        .isMock(false)
+                        .build());
+            }
+        }
     }
 }
