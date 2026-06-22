@@ -103,6 +103,11 @@ public class MockService {
         return mockConfigRepository.findByRouteRuleId(routeRuleId).orElse(null);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<MockConfig> getMockConfigForEndpoint(Long endpointId) {
+        return mockConfigRepository.findByEndpointId(endpointId);
+    }
+
     @SuppressWarnings("unchecked")
     public Object generateMockResponse(ApiEndpoint endpoint) {
         Map<String, Object> responseSchema = endpoint.getResponseSchema();
