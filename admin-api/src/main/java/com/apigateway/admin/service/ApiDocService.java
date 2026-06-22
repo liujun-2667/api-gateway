@@ -561,6 +561,8 @@ public class ApiDocService {
                     .changeType("MODIFY")
                     .changeSummary(changeSummary)
                     .changeDetails(changeDetails)
+                    .requestSchemaSnapshot(current.getRequestSchema() != null ? new LinkedHashMap<>(current.getRequestSchema()) : null)
+                    .responseSchemaSnapshot(current.getResponseSchema() != null ? new LinkedHashMap<>(current.getResponseSchema()) : null)
                     .changedBy(changedBy)
                     .build();
             apiChangeRecordRepository.save(record);

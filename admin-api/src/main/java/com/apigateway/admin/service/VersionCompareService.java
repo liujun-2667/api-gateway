@@ -33,13 +33,19 @@ public class VersionCompareService {
         ApiChangeRecord rightRecord = changeRecordRepository.findById(request.getRightRecordId())
                 .orElseThrow(() -> new NotFoundException("ApiChangeRecord", request.getRightRecordId().toString()));
 
-        ApiEndpoint leftEndpoint = getEndpointSnapshot(leftRecord);
-        ApiEndpoint rightEndpoint = getEndpointSnapshot(rightRecord);
+        Map<String, Object> leftRequestSchema = leftRecord.getRequestSchemaSnapshot();
+        Map<String, Object> rightRequestSchema = rightRecord.getRequestSchemaSnapshot();
+        Map<String, Object> leftResponseSchema = leftRecord.getResponseSchemaSnapshot();
+        Map<String, Object> rightResponseSchema = rightRecord.getResponseSchemaSnapshot();
 
-        Map<String, Object> leftRequestSchema = leftEndpoint.getRequestSchema();
-        Map<String, Object> rightRequestSchema = rightEndpoint.getRequestSchema();
-        Map<String, Object> leftResponseSchema = leftEndpoint.getResponseSchema();
-        Map<String, Object> rightResponseSchema = rightEndpoint.getResponseSchema();
+        if (leftRequestSchema == null || rightRequestSchema == null ||
+            leftResponseSchema == null || rightResponseSchema == null) {
+            ApiEndpoint endpoint = getEndpointFromRecord(leftRecord);
+            if (leftRequestSchema == null) leftRequestSchema = endpoint.getRequestSchema();
+            if (rightRequestSchema == null) rightRequestSchema = endpoint.getRequestSchema();
+            if (leftResponseSchema == null) leftResponseSchema = endpoint.getResponseSchema();
+            if (rightResponseSchema == null) rightResponseSchema = endpoint.getResponseSchema();
+        }
 
         List<Map<String, Object>> requestSchemaDiff = compareSchemas(
                 leftRequestSchema, rightRequestSchema, "request");
@@ -62,7 +68,7 @@ public class VersionCompareService {
                 .build();
     }
 
-    private ApiEndpoint getEndpointSnapshot(ApiChangeRecord record) {
+    private ApiEndpoint getEndpointFromRecord(ApiChangeRecord record) {
         Long endpointId = record.getEndpoint().getId();
         return endpointRepository.findById(endpointId)
                 .orElseThrow(() -> new NotFoundException("ApiEndpoint", endpointId.toString()));

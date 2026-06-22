@@ -39,6 +39,14 @@ public class ApiChangeRecord {
     @Column(columnDefinition = "json")
     private List<Map<String, Object>> changeDetails;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "json")
+    private Map<String, Object> requestSchemaSnapshot;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "json")
+    private Map<String, Object> responseSchemaSnapshot;
+
     @Column(length = 64)
     private String changedBy;
 

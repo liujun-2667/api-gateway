@@ -1,6 +1,6 @@
 import { Component, OnInit, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
+import { ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MaterialModule } from '../../shared/material.module';
 import { DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
@@ -24,7 +24,7 @@ interface DependencyItem {
 @Component({
   selector: 'app-test-suite-editor-dialog',
   standalone: true,
-  imports: [CommonModule, MaterialModule, DragDropModule],
+  imports: [CommonModule, MaterialModule, DragDropModule, ReactiveFormsModule],
   template: `
     <h2 mat-dialog-title>
       <mat-icon>{{ data.mode === 'create' ? 'add_circle' : 'edit' }}</mat-icon>

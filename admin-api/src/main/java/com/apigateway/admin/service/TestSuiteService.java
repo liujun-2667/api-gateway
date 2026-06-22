@@ -171,10 +171,15 @@ public class TestSuiteService {
 
             Map<Long, List<Long>> dependencyGraph = buildDependencyGraph(dependencies, orderedCaseIds);
 
-            ExecutorService caseExecutor = Executors.newFixedThreadPool(concurrencyLevel);
+            List<Long> sortedCaseIds = topologicalSort(orderedCaseIds, dependencyGraph);
+            if (sortedCaseIds == null) {
+                throw new IllegalArgumentException("Circular dependency detected in test suite");
+            }
+
+            ExecutorService caseExecutor = Executors.newFixedThreadPool(Math.max(concurrencyLevel, 1));
             List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-            for (Long caseId : orderedCaseIds) {
+            for (Long caseId : sortedCaseIds) {
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                     try {
                         waitForDependencies(caseId, dependencyGraph, completedCases, caseStatuses);
@@ -290,23 +295,89 @@ public class TestSuiteService {
             for (Map<String, Object> dep : dependencies) {
                 Long caseId = ((Number) dep.get("caseId")).longValue();
                 Long dependsOn = ((Number) dep.get("dependsOn")).longValue();
-                graph.computeIfAbsent(caseId, k -> new ArrayList<>()).add(dependsOn);
+                if (caseIds.contains(caseId) && caseIds.contains(dependsOn)) {
+                    graph.computeIfAbsent(caseId, k -> new ArrayList<>()).add(dependsOn);
+                }
             }
         }
         return graph;
     }
 
+    private List<Long> topologicalSort(List<Long> caseIds, Map<Long, List<Long>> dependencyGraph) {
+        Map<Long, Integer> inDegree = new HashMap<>();
+        Map<Long, List<Long>> reverseGraph = new HashMap<>();
+
+        for (Long caseId : caseIds) {
+            inDegree.put(caseId, 0);
+            reverseGraph.put(caseId, new ArrayList<>());
+        }
+
+        for (Map.Entry<Long, List<Long>> entry : dependencyGraph.entrySet()) {
+            Long caseId = entry.getKey();
+            for (Long dep : entry.getValue()) {
+                if (caseIds.contains(dep)) {
+                    inDegree.put(caseId, inDegree.getOrDefault(caseId, 0) + 1);
+                    reverseGraph.computeIfAbsent(dep, k -> new ArrayList<>()).add(caseId);
+                }
+            }
+        }
+
+        Queue<Long> queue = new LinkedList<>();
+        for (Long caseId : caseIds) {
+            if (inDegree.getOrDefault(caseId, 0) == 0) {
+                queue.offer(caseId);
+            }
+        }
+
+        List<Long> result = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            Long current = queue.poll();
+            result.add(current);
+            for (Long next : reverseGraph.getOrDefault(current, Collections.emptyList())) {
+                int degree = inDegree.get(next) - 1;
+                inDegree.put(next, degree);
+                if (degree == 0) {
+                    queue.offer(next);
+                }
+            }
+        }
+
+        return result.size() == caseIds.size() ? result : null;
+    }
+
     private void waitForDependencies(Long caseId, Map<Long, List<Long>> dependencyGraph,
                                    Set<Long> completedCases, Map<Long, String> caseStatuses) throws InterruptedException {
         List<Long> deps = dependencyGraph.get(caseId);
-        if (deps != null) {
-            for (Long depId : deps) {
-                while (!completedCases.contains(depId)) {
-                    Thread.sleep(100);
-                    if ("FAILED".equals(caseStatuses.get(depId))) {
-                        throw new RuntimeException("Dependency case " + depId + " failed");
-                    }
+        if (deps == null || deps.isEmpty()) {
+            return;
+        }
+
+        long maxWaitTimeMs = 5 * 60 * 1000;
+        long startTime = System.currentTimeMillis();
+
+        for (Long depId : deps) {
+            while (!completedCases.contains(depId)) {
+                if (System.currentTimeMillis() - startTime > maxWaitTimeMs) {
+                    throw new RuntimeException("Dependency case " + depId + " timed out after " +
+                            (maxWaitTimeMs / 1000) + " seconds");
                 }
+
+                if ("FAILED".equals(caseStatuses.get(depId))) {
+                    throw new RuntimeException("Dependency case " + depId + " failed");
+                }
+                if ("SKIPPED".equals(caseStatuses.get(depId))) {
+                    throw new RuntimeException("Dependency case " + depId + " was skipped");
+                }
+
+                Thread.sleep(200);
+            }
+
+            String depStatus = caseStatuses.get(depId);
+            if ("FAILED".equals(depStatus)) {
+                throw new RuntimeException("Dependency case " + depId + " failed");
+            }
+            if ("SKIPPED".equals(depStatus)) {
+                throw new RuntimeException("Dependency case " + depId + " was skipped");
             }
         }
     }

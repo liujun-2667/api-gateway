@@ -294,6 +294,8 @@ CREATE TABLE IF NOT EXISTS api_change_records (
     change_type VARCHAR(64) NOT NULL,
     change_summary VARCHAR(128) NOT NULL,
     change_details JSON,
+    request_schema_snapshot JSON,
+    response_schema_snapshot JSON,
     changed_by VARCHAR(64),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
