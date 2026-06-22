@@ -12,11 +12,16 @@ import { ApplicationService } from '../../core/services/application.service';
 import { Application } from '../../shared/models/application.model';
 import {
   ApiDoc, ApiDocGroup, ApiEndpoint, MockConfig,
-  DebugCase, ApiChangeRecord, ChangeNotification, BatchReplayResult, DebugResponse
+  DebugCase, ApiChangeRecord, ChangeNotification, BatchReplayResult, DebugResponse,
+  TestSuite, TestSuiteCreateRequest, TestSuiteUpdateRequest, TestSuiteExecution,
+  TestReport, VersionCompareRequest, VersionCompareResponse
 } from '../../shared/models/api-doc.model';
-import { Subscription, forkJoin } from 'rxjs';
+import { Subscription, forkJoin, takeUntil, Subject } from 'rxjs';
 import { Client, Stomp } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { VersionCompareDialogComponent } from './version-compare-dialog.component';
+import { TestSuiteEditorDialogComponent } from './test-suite-editor-dialog.component';
+import { TestExecutionDialogComponent } from './test-execution-dialog.component';
 
 interface TreeNode {
   id: number;
@@ -174,7 +179,8 @@ export class ImportDialogComponent {
 @Component({
   selector: 'app-integration-center',
   standalone: true,
-  imports: [CommonModule, MaterialModule, PageHeaderComponent],
+  imports: [CommonModule, MaterialModule, PageHeaderComponent, 
+    VersionCompareDialogComponent, TestSuiteEditorDialogComponent, TestExecutionDialogComponent],
   template: `
     <app-page-header title="联调中心" subtitle="API文档管理、Mock服务与在线调试" icon="hub">
       <mat-form-field appearance="outline" class="filter-field">
@@ -425,14 +431,33 @@ export class ImportDialogComponent {
           <mat-tab label="变更历史">
             <div class="tab-content">
               <mat-card class="detail-card">
-                <mat-card-title>变更历史</mat-card-title>
+                <mat-card-title>
+                  <div class="card-title-row">
+                    <span>变更历史</span>
+                    <div class="card-title-actions">
+                      <button mat-raised-button 
+                              color="primary" 
+                              [disabled]="selectedChangeRecordIds.size !== 2"
+                              (click)="compareVersions()">
+                        <mat-icon>compare_arrows</mat-icon>
+                        对比 ({{ selectedChangeRecordIds.size }}/2)
+                      </button>
+                    </div>
+                  </div>
+                </mat-card-title>
                 <mat-card-content>
                   <div *ngIf="changeRecords.length === 0" class="no-data">
                     <mat-icon>info</mat-icon>
                     <span>暂无变更记录</span>
                   </div>
                   <mat-list *ngIf="changeRecords.length > 0">
-                    <mat-list-item *ngFor="let record of changeRecords">
+                    <mat-list-item *ngFor="let record of changeRecords" 
+                                   [class.selected-record]="selectedChangeRecordIds.has(record.id)">
+                      <mat-checkbox 
+                        [checked]="selectedChangeRecordIds.has(record.id)"
+                        (change)="toggleChangeRecord(record.id, $event.checked)"
+                        [disabled]="!selectedChangeRecordIds.has(record.id) && selectedChangeRecordIds.size >= 2">
+                      </mat-checkbox>
                       <mat-icon matListItemIcon color="primary">history</mat-icon>
                       <span matListItemTitle>{{ record.changeSummary }}</span>
                       <span matListItemLine>{{ record.changedBy || '系统' }} · {{ record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</span>
@@ -448,6 +473,84 @@ export class ImportDialogComponent {
                   </mat-list>
                 </mat-card-content>
               </mat-card>
+            </div>
+          </mat-tab>
+
+          <mat-tab label="回归测试">
+            <div class="tab-content regression-tab">
+              <div class="regression-header">
+                <h3><mat-icon color="primary">science</mat-icon> 测试套件管理</h3>
+                <button mat-raised-button color="primary" (click)="openCreateSuiteDialog()">
+                  <mat-icon>add</mat-icon>
+                  创建测试套件
+                </button>
+              </div>
+
+              <mat-tab-group [(selectedIndex)]="testSuiteTabIndex" class="suite-tabs">
+                <mat-tab label="测试套件">
+                  <div *ngIf="loadingSuites" class="loading-state">
+                    <mat-spinner diameter="32"></mat-spinner>
+                    <span>加载中...</span>
+                  </div>
+                  <div *ngIf="!loadingSuites && testSuites.length === 0" class="no-data">
+                    <mat-icon>inbox</mat-icon>
+                    <span>暂无测试套件，点击上方按钮创建</span>
+                  </div>
+                  <div class="suite-list" *ngIf="!loadingSuites && testSuites.length > 0">
+                    <mat-card *ngFor="let suite of testSuites" class="suite-card">
+                      <div class="suite-card-header">
+                        <div class="suite-info">
+                          <h4>{{ suite.name }}</h4>
+                          <p class="suite-desc">{{ suite.description || '暂无描述' }}</p>
+                          <div class="suite-meta">
+                            <span><mat-icon>list_alt</mat-icon> {{ suite.caseOrder?.length || 0 }} 个用例</span>
+                            <span><mat-icon>speed</mat-icon> 并发度: {{ suite.concurrencyLevel || 1 }}</span>
+                            <span><mat-icon>schedule</mat-icon> {{ suite.createdAt | date:'yyyy-MM-dd HH:mm' }}</span>
+                          </div>
+                        </div>
+                        <div class="suite-actions">
+                          <button mat-icon-button color="primary" (click)="executeSuite(suite)" matTooltip="执行">
+                            <mat-icon>play_circle</mat-icon>
+                          </button>
+                          <button mat-icon-button (click)="openEditSuiteDialog(suite)" matTooltip="编辑">
+                            <mat-icon>edit</mat-icon>
+                          </button>
+                          <button mat-icon-button color="warn" (click)="deleteSuite(suite)" matTooltip="删除">
+                            <mat-icon>delete</mat-icon>
+                          </button>
+                        </div>
+                      </div>
+                    </mat-card>
+                  </div>
+                </mat-tab>
+
+                <mat-tab label="测试报告">
+                  <div *ngIf="testReports.length === 0" class="no-data">
+                    <mat-icon>description</mat-icon>
+                    <span>暂无测试报告</span>
+                  </div>
+                  <div class="report-list" *ngIf="testReports.length > 0">
+                    <mat-card *ngFor="let report of testReports" class="report-card">
+                      <div class="report-card-header">
+                        <div class="report-info">
+                          <h4>{{ report.name }}</h4>
+                          <div class="report-meta">
+                            <span class="passed"><mat-icon>check_circle</mat-icon> {{ report.passedCases || 0 }}</span>
+                            <span class="failed"><mat-icon>cancel</mat-icon> {{ report.failedCases || 0 }}</span>
+                            <span class="duration"><mat-icon>timer</mat-icon> {{ formatDuration(report.totalDurationMs) }}</span>
+                            <span><mat-icon>schedule</mat-icon> {{ report.createdAt | date:'yyyy-MM-dd HH:mm' }}</span>
+                          </div>
+                        </div>
+                        <div class="report-actions">
+                          <button mat-icon-button color="primary" (click)="viewReport(report)" matTooltip="查看详情">
+                            <mat-icon>visibility</mat-icon>
+                          </button>
+                        </div>
+                      </div>
+                    </mat-card>
+                  </div>
+                </mat-tab>
+              </mat-tab-group>
             </div>
           </mat-tab>
         </mat-tab-group>
@@ -525,6 +628,142 @@ export class ImportDialogComponent {
     .type-badge.add { background: #e8f5e9; color: #4caf50; }
     .type-badge.remove { background: #ffebee; color: #f44336; }
     .type-badge.modify { background: #fff3e0; color: #ff9800; }
+
+    .card-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .card-title-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .selected-record {
+      background: #e3f2fd;
+    }
+    .regression-tab {
+      padding: 8px 0;
+    }
+    .regression-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .regression-header h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      font-size: 18px;
+    }
+    .suite-tabs {
+      margin-top: 16px;
+    }
+    .suite-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .suite-card {
+      transition: box-shadow 0.2s;
+    }
+    .suite-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .suite-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .suite-info {
+      flex: 1;
+    }
+    .suite-info h4 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+    }
+    .suite-desc {
+      margin: 0 0 12px 0;
+      color: #666;
+      font-size: 13px;
+    }
+    .suite-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #888;
+    }
+    .suite-meta span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .suite-meta mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+    .suite-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .report-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .report-card {
+      transition: box-shadow 0.2s;
+    }
+    .report-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .report-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .report-info {
+      flex: 1;
+    }
+    .report-info h4 {
+      margin: 0 0 12px 0;
+      font-size: 15px;
+    }
+    .report-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      align-items: center;
+    }
+    .report-meta span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .report-meta mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+    .report-meta .passed { color: #4caf50; }
+    .report-meta .failed { color: #f44336; }
+    .report-meta .duration { color: #ff9800; }
+    .report-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      gap: 12px;
+      color: #666;
+    }
   `]
 })
 export class IntegrationCenterComponent implements OnInit, OnDestroy {
@@ -547,6 +786,14 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   debugSending = false;
   replaying = false;
 
+  selectedChangeRecordIds = new Set<number>();
+  testSuites: TestSuite[] = [];
+  selectedTestSuite: TestSuite | null = null;
+  testReports: TestReport[] = [];
+  loadingSuites = false;
+  leftTabIndex = 0;
+  testSuiteTabIndex = 0;
+
   treeControl = new NestedTreeControl<TreeNode>(node => node.children || []);
   treeDataSource = new MatTreeNestedDataSource<TreeNode>();
   hasChild = (_: number, node: TreeNode) => !!node.children && node.children.length > 0;
@@ -554,6 +801,7 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   expandedGroups = new Set<number>();
   private stompClient: Client | null = null;
   private subscriptions: Subscription[] = [];
+  private destroy$ = new Subject<void>();
 
   constructor(
     private apiDocService: ApiDocService,
@@ -577,6 +825,7 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
         if (apps.length > 0) {
           this.selectedAppId = apps[0].id;
           this.loadApiDocs();
+          this.loadTestSuites();
         }
       },
       error: (err) => {
@@ -590,6 +839,8 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subscriptions.forEach(s => s.unsubscribe());
     this.disconnectWebSocket();
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   onAppChange(appId: number): void {
@@ -599,6 +850,7 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
     this.treeDataSource.data = [];
     this.disconnectWebSocket();
     this.loadApiDocs();
+    this.loadTestSuites();
   }
 
   loadApiDocs(): void {
@@ -1013,5 +1265,291 @@ export class IntegrationCenterComponent implements OnInit, OnDestroy {
     if (!obj) return '';
     try { return JSON.stringify(obj, null, 2); }
     catch (e) { return String(obj); }
+  }
+
+  formatDuration(ms?: number): string {
+    if (!ms) return '0ms';
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = Math.floor(ms / 1000);
+    const remainingMs = ms % 1000;
+    if (seconds < 60) return `${seconds}.${remainingMs.toString().padStart(3, '0')}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  }
+
+  toggleChangeRecord(recordId: number, checked: boolean): void {
+    if (checked) {
+      this.selectedChangeRecordIds.add(recordId);
+    } else {
+      this.selectedChangeRecordIds.delete(recordId);
+    }
+  }
+
+  compareVersions(): void {
+    if (this.selectedChangeRecordIds.size !== 2 || !this.selectedEndpoint) return;
+
+    const ids = Array.from(this.selectedChangeRecordIds);
+    const request: VersionCompareRequest = {
+      endpointId: this.selectedEndpoint.id,
+      recordId1: ids[0],
+      recordId2: ids[1]
+    };
+
+    this.apiDocService.compareVersions(request).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (response: VersionCompareResponse) => {
+        const record1 = this.changeRecords.find(r => r.id === ids[0]);
+        const record2 = this.changeRecords.find(r => r.id === ids[1]);
+        
+        this.dialog.open(VersionCompareDialogComponent, {
+          data: {
+            compareResponse: response,
+            record1,
+            record2
+          },
+          width: '1000px',
+          height: '700px'
+        });
+      },
+      error: (err: any) => {
+        this.snackBar.open('对比失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+      }
+    });
+  }
+
+  loadTestSuites(): void {
+    if (!this.selectedAppId) return;
+
+    this.loadingSuites = true;
+    this.apiDocService.getTestSuites(this.selectedAppId).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (suites: TestSuite[]) => {
+        this.testSuites = suites;
+        this.loadingSuites = false;
+        if (suites.length > 0) {
+          this.selectedTestSuite = suites[0];
+          this.loadTestReports(suites[0].id);
+        }
+      },
+      error: (err: any) => {
+        console.error('Failed to load test suites:', err);
+        this.loadingSuites = false;
+        this.snackBar.open('加载测试套件失败', '关闭', { duration: 3000 });
+      }
+    });
+  }
+
+  loadTestReports(suiteId: number): void {
+    this.apiDocService.getSuiteReports(suiteId).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (reports: TestReport[]) => {
+        this.testReports = reports;
+      },
+      error: (err: any) => {
+        console.error('Failed to load test reports:', err);
+      }
+    });
+  }
+
+  getAllDebugCases(): DebugCase[] {
+    const allCases: DebugCase[] = [];
+    for (const doc of this.apiDocs) {
+      if (doc.groups) {
+        for (const group of doc.groups) {
+          if (group.endpoints) {
+            for (const ep of group.endpoints) {
+              if (ep.debugCases) {
+                allCases.push(...ep.debugCases.map(c => ({
+                  ...c,
+                  endpointName: ep.name
+                })));
+              }
+            }
+          }
+        }
+      }
+    }
+    return allCases;
+  }
+
+  openCreateSuiteDialog(): void {
+    if (!this.selectedAppId) return;
+
+    const availableCases = this.getAllDebugCases();
+    const dialogRef = this.dialog.open(TestSuiteEditorDialogComponent, {
+      data: {
+        mode: 'create' as const,
+        applicationId: this.selectedAppId,
+        availableCases
+      },
+      width: '900px'
+    });
+
+    dialogRef.afterClosed().subscribe((result: TestSuiteCreateRequest) => {
+      if (result && this.selectedAppId) {
+        this.apiDocService.createTestSuite(this.selectedAppId, result).pipe(
+          takeUntil(this.destroy$)
+        ).subscribe({
+          next: () => {
+            this.snackBar.open('测试套件创建成功', '关闭', { duration: 3000 });
+            this.loadTestSuites();
+          },
+          error: (err: any) => {
+            this.snackBar.open('创建失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+          }
+        });
+      }
+    });
+  }
+
+  openEditSuiteDialog(suite: TestSuite): void {
+    if (!this.selectedAppId) return;
+
+    const availableCases = this.getAllDebugCases();
+    const dialogRef = this.dialog.open(TestSuiteEditorDialogComponent, {
+      data: {
+        mode: 'edit' as const,
+        suite,
+        applicationId: this.selectedAppId,
+        availableCases
+      },
+      width: '900px'
+    });
+
+    dialogRef.afterClosed().subscribe((result: TestSuiteUpdateRequest) => {
+      if (result) {
+        this.apiDocService.updateTestSuite(suite.id, result).pipe(
+          takeUntil(this.destroy$)
+        ).subscribe({
+          next: () => {
+            this.snackBar.open('测试套件更新成功', '关闭', { duration: 3000 });
+            this.loadTestSuites();
+          },
+          error: (err: any) => {
+            this.snackBar.open('更新失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+          }
+        });
+      }
+    });
+  }
+
+  deleteSuite(suite: TestSuite): void {
+    if (!confirm(`确定要删除测试套件"${suite.name}"吗？`)) return;
+
+    this.apiDocService.deleteTestSuite(suite.id).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: () => {
+        this.snackBar.open('测试套件已删除', '关闭', { duration: 3000 });
+        if (this.selectedTestSuite?.id === suite.id) {
+          this.selectedTestSuite = null;
+        }
+        this.loadTestSuites();
+      },
+      error: (err: any) => {
+        this.snackBar.open('删除失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+      }
+    });
+  }
+
+  executeSuite(suite: TestSuite): void {
+    this.selectedTestSuite = suite;
+    const availableCases = this.getAllDebugCases();
+
+    this.apiDocService.executeTestSuite(suite.id).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (execution: TestSuiteExecution) => {
+        const dialogRef = this.dialog.open(TestExecutionDialogComponent, {
+          data: {
+            testSuite: suite,
+            execution,
+            debugCases: availableCases
+          },
+          width: '900px',
+          height: '700px'
+        });
+
+        dialogRef.afterClosed().subscribe((result: any) => {
+          if (result?.action === 'jumpToDebug' && result.debugCase) {
+            this.jumpToDebugCase(result.debugCase);
+          } else if (result?.action === 'reportSaved') {
+            this.snackBar.open('测试报告已保存', '关闭', { duration: 3000 });
+            this.loadTestReports(suite.id);
+            this.testSuiteTabIndex = 1;
+          }
+        });
+      },
+      error: (err: any) => {
+        this.snackBar.open('执行失败: ' + (err.error?.message || err.message), '关闭', { duration: 5000 });
+      }
+    });
+  }
+
+  jumpToDebugCase(debugCase: DebugCase): void {
+    let targetEndpoint: ApiEndpoint | null = null;
+    
+    for (const doc of this.apiDocs) {
+      if (doc.groups) {
+        for (const group of doc.groups) {
+          if (group.endpoints) {
+            const ep = group.endpoints.find(e => e.id === debugCase.endpointId);
+            if (ep) {
+              targetEndpoint = ep;
+              break;
+            }
+          }
+        }
+        if (targetEndpoint) break;
+      }
+    }
+
+    if (targetEndpoint) {
+      this.selectedEndpoint = targetEndpoint;
+      this.rightTabIndex = 2;
+      this.loadEndpointDetails(targetEndpoint.id);
+      
+      setTimeout(() => {
+        this.debugRequestBody = debugCase.requestBody ? JSON.stringify(debugCase.requestBody, null, 2) : '';
+        this.debugUseMock = debugCase.useMock;
+      }, 100);
+      
+      this.snackBar.open(`已跳转到调试区加载用例: ${debugCase.name}`, '关闭', { duration: 3000 });
+    } else {
+      this.snackBar.open('未找到对应的接口', '关闭', { duration: 3000 });
+    }
+  }
+
+  viewReport(report: TestReport): void {
+    const suite = this.testSuites.find(s => s.id === report.testSuiteId);
+    if (!suite) {
+      this.snackBar.open('未找到对应的测试套件', '关闭', { duration: 3000 });
+      return;
+    }
+
+    const availableCases = this.getAllDebugCases();
+    const execution: TestSuiteExecution = {
+      id: report.executionId || 0,
+      status: 'COMPLETED',
+      totalCases: (report.passedCases || 0) + (report.failedCases || 0),
+      passedCases: report.passedCases,
+      failedCases: report.failedCases,
+      totalDurationMs: report.totalDurationMs,
+      caseResults: report.caseResults || []
+    };
+
+    this.dialog.open(TestExecutionDialogComponent, {
+      data: {
+        testSuite: suite,
+        execution,
+        debugCases: availableCases
+      },
+      width: '900px',
+      height: '700px'
+    });
   }
 }

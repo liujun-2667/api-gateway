@@ -298,6 +298,68 @@ CREATE TABLE IF NOT EXISTS api_change_records (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 变更记录备注表
+CREATE TABLE IF NOT EXISTS change_record_remarks (
+    id BIGSERIAL PRIMARY KEY,
+    change_record_id BIGINT NOT NULL REFERENCES api_change_records(id) ON DELETE CASCADE,
+    field_path VARCHAR(256) NOT NULL,
+    remark_type VARCHAR(32) NOT NULL,
+    remark VARCHAR(512),
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 测试套件表
+CREATE TABLE IF NOT EXISTS test_suites (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512),
+    application_id BIGINT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    case_order JSON,
+    dependencies JSON,
+    global_variables JSON,
+    concurrency_level INTEGER NOT NULL DEFAULT 1,
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 测试套件执行表
+CREATE TABLE IF NOT EXISTS test_suite_executions (
+    id BIGSERIAL PRIMARY KEY,
+    test_suite_id BIGINT NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE,
+    status VARCHAR(32) NOT NULL,
+    total_cases INTEGER NOT NULL,
+    passed_cases INTEGER,
+    failed_cases INTEGER,
+    total_duration_ms BIGINT,
+    case_results JSON,
+    executed_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+-- 测试报告表
+CREATE TABLE IF NOT EXISTS test_reports (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    test_suite_id BIGINT NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE,
+    execution_id BIGINT NOT NULL REFERENCES test_suite_executions(id) ON DELETE CASCADE,
+    total_cases INTEGER NOT NULL,
+    passed_cases INTEGER NOT NULL,
+    failed_cases INTEGER NOT NULL,
+    success_rate DOUBLE PRECISION,
+    total_duration_ms BIGINT NOT NULL,
+    case_details JSON,
+    summary JSON,
+    remarks VARCHAR(1024),
+    created_by VARCHAR(64),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================
 -- 索引创建
 -- ============================================
@@ -331,6 +393,16 @@ CREATE INDEX IF NOT EXISTS idx_mock_configs_route_rule_id ON mock_configs(route_
 CREATE INDEX IF NOT EXISTS idx_debug_cases_endpoint_id ON debug_cases(endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_api_change_records_endpoint_id ON api_change_records(endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_api_change_records_created_at ON api_change_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_change_record_remarks_change_record_id ON change_record_remarks(change_record_id);
+CREATE INDEX IF NOT EXISTS idx_change_record_remarks_field_path ON change_record_remarks(field_path);
+CREATE INDEX IF NOT EXISTS idx_test_suites_application_id ON test_suites(application_id);
+CREATE INDEX IF NOT EXISTS idx_test_suites_created_by ON test_suites(created_by);
+CREATE INDEX IF NOT EXISTS idx_test_suite_executions_test_suite_id ON test_suite_executions(test_suite_id);
+CREATE INDEX IF NOT EXISTS idx_test_suite_executions_status ON test_suite_executions(status);
+CREATE INDEX IF NOT EXISTS idx_test_suite_executions_created_at ON test_suite_executions(created_at);
+CREATE INDEX IF NOT EXISTS idx_test_reports_test_suite_id ON test_reports(test_suite_id);
+CREATE INDEX IF NOT EXISTS idx_test_reports_execution_id ON test_reports(execution_id);
+CREATE INDEX IF NOT EXISTS idx_test_reports_created_at ON test_reports(created_at);
 
 -- ============================================
 -- 初始数据

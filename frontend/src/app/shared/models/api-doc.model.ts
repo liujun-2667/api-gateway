@@ -114,3 +114,148 @@ export interface BatchReplayResult {
   actualResponse?: DebugResponse;
   diffResult?: any;
 }
+
+export interface VersionCompareRequest {
+  leftRecordId: number;
+  rightRecordId: number;
+}
+
+export interface VersionCompareResponse {
+  leftRecordId: number;
+  rightRecordId: number;
+  leftTimestamp: string;
+  rightTimestamp: string;
+  leftChangedBy?: string;
+  rightChangedBy?: string;
+  leftRequestSchema?: any;
+  rightRequestSchema?: any;
+  leftResponseSchema?: any;
+  rightResponseSchema?: any;
+  requestSchemaDiff?: SchemaDiff[];
+  responseSchemaDiff?: SchemaDiff[];
+}
+
+export interface SchemaDiff {
+  field: string;
+  path: string;
+  changeType: 'ADD' | 'REMOVE' | 'MODIFY' | 'TYPE_CHANGE';
+  oldValue?: any;
+  newValue?: any;
+  oldType?: string;
+  newType?: string;
+}
+
+export interface ChangeRemark {
+  id: number;
+  changeRecordId: number;
+  fieldPath: string;
+  remarkType: 'COMPATIBLE' | 'NEEDS_ADAPTATION';
+  remark?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChangeRemarkRequest {
+  fieldPath: string;
+  remarkType: 'COMPATIBLE' | 'NEEDS_ADAPTATION';
+  remark?: string;
+}
+
+export type TestSuiteStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_FAILURES' | 'FAILED';
+export type CaseExecutionStatus = 'WAITING' | 'RUNNING' | 'PASSED' | 'FAILED';
+
+export interface TestSuite {
+  id: number;
+  name: string;
+  description?: string;
+  applicationId: number;
+  applicationName?: string;
+  caseOrder?: { caseId: number; caseName?: string; }[];
+  dependencies?: { caseId: number; dependsOn: number; }[];
+  globalVariables?: { [key: string]: any };
+  concurrencyLevel: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TestSuiteCreateRequest {
+  name: string;
+  description?: string;
+  applicationId: number;
+  caseOrder?: { caseId: number; }[];
+  dependencies?: { caseId: number; dependsOn: number; }[];
+  globalVariables?: { [key: string]: any };
+  concurrencyLevel: number;
+}
+
+export interface TestSuiteUpdateRequest {
+  name?: string;
+  description?: string;
+  caseOrder?: { caseId: number; }[];
+  dependencies?: { caseId: number; dependsOn: number; }[];
+  globalVariables?: { [key: string]: any };
+  concurrencyLevel?: number;
+}
+
+export interface TestSuiteExecution {
+  id: number;
+  testSuiteId: number;
+  testSuiteName: string;
+  status: TestSuiteStatus;
+  totalCases: number;
+  passedCases?: number;
+  failedCases?: number;
+  totalDurationMs?: number;
+  caseResults?: CaseExecutionResult[];
+  executedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+}
+
+export interface CaseExecutionResult {
+  caseId: number;
+  caseName: string;
+  status: CaseExecutionStatus;
+  durationMs?: number;
+  response?: DebugResponse;
+  diffResult?: any;
+  errorMessage?: string;
+}
+
+export interface CaseExecutionProgress {
+  caseId: number;
+  caseName: string;
+  status: CaseExecutionStatus;
+  durationMs?: number;
+  diffResult?: any;
+  errorMessage?: string;
+}
+
+export interface TestReport {
+  id: number;
+  name: string;
+  testSuiteId: number;
+  testSuiteName: string;
+  executionId: number;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  successRate?: number;
+  totalDurationMs: number;
+  caseDetails?: CaseExecutionResult[];
+  summary?: any;
+  remarks?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TestReportCreateRequest {
+  name: string;
+  testSuiteId: number;
+  executionId: number;
+  remarks?: string;
+}

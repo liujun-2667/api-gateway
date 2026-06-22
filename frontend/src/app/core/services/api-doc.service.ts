@@ -9,7 +9,17 @@ import {
   MockConfig,
   DebugCase,
   ApiChangeRecord,
-  BatchReplayResult
+  BatchReplayResult,
+  VersionCompareRequest,
+  VersionCompareResponse,
+  ChangeRemark,
+  ChangeRemarkRequest,
+  TestSuite,
+  TestSuiteCreateRequest,
+  TestSuiteUpdateRequest,
+  TestSuiteExecution,
+  TestReport,
+  TestReportCreateRequest
 } from '../../shared/models/api-doc.model';
 
 @Injectable({
@@ -120,5 +130,65 @@ export class ApiDocService extends ApiService<ApiDoc> {
 
   getApiDocDetail(id: number): Observable<ApiDoc> {
     return this.http.get<ApiDoc>(`${this.baseUrl}/api-docs/${id}`);
+  }
+
+  compareVersions(request: VersionCompareRequest): Observable<VersionCompareResponse> {
+    return this.http.post<VersionCompareResponse>(`${this.baseUrl}/version-compare`, request);
+  }
+
+  addRemark(changeRecordId: number, request: ChangeRemarkRequest): Observable<ChangeRemark> {
+    return this.http.post<ChangeRemark>(`${this.baseUrl}/change-records/${changeRecordId}/remarks`, request);
+  }
+
+  getRemarks(changeRecordId: number): Observable<ChangeRemark[]> {
+    return this.http.get<ChangeRemark[]>(`${this.baseUrl}/change-records/${changeRecordId}/remarks`);
+  }
+
+  deleteRemark(remarkId: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/change-records/remarks/${remarkId}`);
+  }
+
+  createTestSuite(appId: number, data: TestSuiteCreateRequest): Observable<TestSuite> {
+    return this.http.post<TestSuite>(`${this.baseUrl}/apps/${appId}/test-suites`, data);
+  }
+
+  getTestSuites(appId: number): Observable<TestSuite[]> {
+    return this.http.get<TestSuite[]>(`${this.baseUrl}/apps/${appId}/test-suites`);
+  }
+
+  getTestSuite(id: number): Observable<TestSuite> {
+    return this.http.get<TestSuite>(`${this.baseUrl}/test-suites/${id}`);
+  }
+
+  updateTestSuite(id: number, data: TestSuiteUpdateRequest): Observable<TestSuite> {
+    return this.http.put<TestSuite>(`${this.baseUrl}/test-suites/${id}`, data);
+  }
+
+  deleteTestSuite(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/test-suites/${id}`);
+  }
+
+  executeTestSuite(id: number): Observable<TestSuiteExecution> {
+    return this.http.post<TestSuiteExecution>(`${this.baseUrl}/test-suites/${id}/execute`, {});
+  }
+
+  getSuiteExecutions(suiteId: number): Observable<TestSuiteExecution[]> {
+    return this.http.get<TestSuiteExecution[]>(`${this.baseUrl}/test-suites/${suiteId}/executions`);
+  }
+
+  getExecution(id: number): Observable<TestSuiteExecution> {
+    return this.http.get<TestSuiteExecution>(`${this.baseUrl}/test-suites/executions/${id}`);
+  }
+
+  saveReport(data: TestReportCreateRequest): Observable<TestReport> {
+    return this.http.post<TestReport>(`${this.baseUrl}/test-suites/reports`, data);
+  }
+
+  getSuiteReports(suiteId: number): Observable<TestReport[]> {
+    return this.http.get<TestReport[]>(`${this.baseUrl}/test-suites/${suiteId}/reports`);
+  }
+
+  getReport(id: number): Observable<TestReport> {
+    return this.http.get<TestReport>(`${this.baseUrl}/test-suites/reports/${id}`);
   }
 }

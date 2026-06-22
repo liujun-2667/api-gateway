@@ -372,4 +372,215 @@ public class ApiDocDTO {
         private String changeSummary;
         private LocalDateTime timestamp;
     }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VersionCompareRequest {
+        @NotNull(message = "Left record ID is required")
+        private Long leftRecordId;
+
+        @NotNull(message = "Right record ID is required")
+        private Long rightRecordId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VersionCompareResponse {
+        private Long leftRecordId;
+        private Long rightRecordId;
+        private LocalDateTime leftTimestamp;
+        private LocalDateTime rightTimestamp;
+        private String leftChangedBy;
+        private String rightChangedBy;
+        private Map<String, Object> leftRequestSchema;
+        private Map<String, Object> rightRequestSchema;
+        private Map<String, Object> leftResponseSchema;
+        private Map<String, Object> rightResponseSchema;
+        private List<Map<String, Object>> requestSchemaDiff;
+        private List<Map<String, Object>> responseSchemaDiff;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ChangeRemarkRequest {
+        @NotBlank(message = "Field path is required")
+        @Size(max = 256, message = "Field path must be at most 256 characters")
+        private String fieldPath;
+
+        @NotBlank(message = "Remark type is required")
+        @Size(max = 32, message = "Remark type must be at most 32 characters")
+        private String remarkType;
+
+        @Size(max = 512, message = "Remark must be at most 512 characters")
+        private String remark;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ChangeRemarkResponse {
+        private Long id;
+        private Long changeRecordId;
+        private String fieldPath;
+        private String remarkType;
+        private String remark;
+        private String createdBy;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestSuiteCreateRequest {
+        @NotBlank(message = "Suite name is required")
+        @Size(max = 128, message = "Name must be at most 128 characters")
+        private String name;
+
+        @Size(max = 512, message = "Description must be at most 512 characters")
+        private String description;
+
+        @NotNull(message = "Application ID is required")
+        private Long applicationId;
+
+        private List<Map<String, Object>> caseOrder;
+
+        private List<Map<String, Object>> dependencies;
+
+        private Map<String, Object> globalVariables;
+
+        @NotNull(message = "Concurrency level is required")
+        private Integer concurrencyLevel;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestSuiteUpdateRequest {
+        @Size(max = 128, message = "Name must be at most 128 characters")
+        private String name;
+
+        @Size(max = 512, message = "Description must be at most 512 characters")
+        private String description;
+
+        private List<Map<String, Object>> caseOrder;
+
+        private List<Map<String, Object>> dependencies;
+
+        private Map<String, Object> globalVariables;
+
+        private Integer concurrencyLevel;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestSuiteResponse {
+        private Long id;
+        private String name;
+        private String description;
+        private Long applicationId;
+        private String applicationName;
+        private List<Map<String, Object>> caseOrder;
+        private List<Map<String, Object>> dependencies;
+        private Map<String, Object> globalVariables;
+        private Integer concurrencyLevel;
+        private String createdBy;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestSuiteExecuteRequest {
+        @NotNull(message = "Test suite ID is required")
+        private Long testSuiteId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestSuiteExecutionResponse {
+        private Long id;
+        private Long testSuiteId;
+        private String testSuiteName;
+        private String status;
+        private Integer totalCases;
+        private Integer passedCases;
+        private Integer failedCases;
+        private Long totalDurationMs;
+        private List<Map<String, Object>> caseResults;
+        private String executedBy;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+        private LocalDateTime completedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestReportCreateRequest {
+        @NotBlank(message = "Report name is required")
+        @Size(max = 128, message = "Name must be at most 128 characters")
+        private String name;
+
+        @NotNull(message = "Test suite ID is required")
+        private Long testSuiteId;
+
+        @NotNull(message = "Execution ID is required")
+        private Long executionId;
+
+        @Size(max = 1024, message = "Remarks must be at most 1024 characters")
+        private String remarks;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TestReportResponse {
+        private Long id;
+        private String name;
+        private Long testSuiteId;
+        private String testSuiteName;
+        private Long executionId;
+        private Integer totalCases;
+        private Integer passedCases;
+        private Integer failedCases;
+        private Double successRate;
+        private Long totalDurationMs;
+        private List<Map<String, Object>> caseDetails;
+        private Map<String, Object> summary;
+        private String remarks;
+        private String createdBy;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CaseExecutionProgress {
+        private Long caseId;
+        private String caseName;
+        private String status;
+        private Long durationMs;
+        private Map<String, Object> diffResult;
+        private String errorMessage;
+    }
 }
